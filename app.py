@@ -5,6 +5,7 @@ Run: streamlit run app.py
 
 import json
 import os
+import subprocess
 from datetime import datetime
 
 import markdown as md_lib
@@ -863,11 +864,13 @@ def render_executive_report():
         if rec == "SCALE":
             return [
                 f"📣 Scale budget to the full eligible audience — at {actual_roi:.0f}% ROI, each additional activation returns <b>${net_margin:.2f} net margin</b>",
-                f"💰 Current result: <b>{ic_str} iCustomers</b>, <b>{ittv_str} iTTV</b> ({incr_pct:.0f}% truly incremental) — proportional scaling should multiply these figures",
+                f"💰 Current result: <b>{ic_str} iCustomers</b>, <b>{ittv_str} iTTV</b>"
+                f"{f' ({incr_pct:.0f}% truly incremental)' if incr_pct is not None else ''}"
+                f" — proportional scaling should multiply these figures",
                 f"🤝 Share <b>t = {t_str}</b> result with brand partner — {confidence} confidence is the data package needed to unlock the next co-marketing budget cycle",
-                f"📊 Set <b>{confidence} CI</b> (t = {t_stat:.3f if t_stat else '—'}) as the performance benchmark — reject any future test that doesn't clear this bar",
-                f"🎯 Seed v2 look-alike audience from the <b>{ic_str} incremental converters</b> ({incr_pct:.0f}% of all conversions were net-new, {100-incr_pct:.0f}% cannibalized)" if incr_pct else
-                f"🎯 Seed v2 look-alike audience from the {ic_str} incremental converters to target the highest-propensity customers",
+                f"📊 Set <b>{confidence} CI</b> (t = {f'{t_stat:.3f}' if t_stat is not None else '—'}) as the performance benchmark — reject any future test that doesn't clear this bar",
+                f"🎯 Seed v2 look-alike from the <b>{ic_str} incremental converters</b> ({incr_pct:.0f}% net-new · {100-incr_pct:.0f}% cannibalized)" if incr_pct is not None else
+                f"🎯 Seed v2 look-alike from the {ic_str} incremental converters — highest-propensity customers as v2 seed audience",
             ]
         if rec == "GREENLIGHT":
             return [
@@ -961,6 +964,19 @@ def render_executive_report():
 # ── Layout ────────────────────────────────────────────────────────────────────
 
 _now = datetime.now().strftime("%d %b %Y · %H:%M")
+try:
+    _last_author = subprocess.check_output(
+        ["git", "log", "-1", "--pretty=format:%an"],
+        cwd=os.path.dirname(os.path.abspath(__file__)),
+        stderr=subprocess.DEVNULL,
+    ).decode().strip() or "—"
+    _last_date = subprocess.check_output(
+        ["git", "log", "-1", "--pretty=format:%ad", "--date=format:%d %b %Y"],
+        cwd=os.path.dirname(os.path.abspath(__file__)),
+        stderr=subprocess.DEVNULL,
+    ).decode().strip() or ""
+except Exception:
+    _last_author, _last_date = "—", ""
 st.markdown(f"""
 <div class="zip-header">
   <div class="zip-logo-wrap">
@@ -990,7 +1006,8 @@ st.markdown(f"""
   </div>
   <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
     <span class="zip-badge">● Live Demo</span>
-    <span style="color:#786D79;font-size:0.68rem;letter-spacing:0.3px;">🕐 Last updated: {_now}</span>
+    <span style="color:#786D79;font-size:0.68rem;letter-spacing:0.3px;">🕐 Last updated: {_last_date or _now}</span>
+    <span style="color:#8B858E;font-size:0.65rem;letter-spacing:0.2px;">👤 {_last_author}</span>
   </div>
 </div>
 """, unsafe_allow_html=True)
