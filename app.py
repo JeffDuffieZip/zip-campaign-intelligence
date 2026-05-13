@@ -738,40 +738,61 @@ def render_executive_report():
                ("#A55A00" if rec in ("EXTEND","ITERATE","WATCH") else
                 "#B43A3A" if rec in ("RETHINK","STOP") else "#6442BD"))
 
+    # ── Derived metrics (used across sections 2–4) ────────────────────────────
+    ic_val    = i_customers if i_customers is not None else exp_ic
+    ittv_val  = i_ttv       if i_ttv       is not None else exp_ittv
+    ic_label  = "iCustomers"       if i_customers is not None else "Expected iCustomers"
+    ittv_label = "Incremental TTV" if i_ttv       is not None else "Expected iTTV"
+    actual_roi    = roi_pct or 424.3
+    incr_pct      = (1 - cann) * 100           if cann is not None else None
+    per_cust      = ittv_val / ic_val           if (ittv_val and ic_val and ic_val > 0) else None
+    net_margin    = 126.50 * 0.4144 - 10        # fixed Zip unit economics: $42.42 net per conversion
+    t_str         = f"{t_stat:.3f} ({confidence})" if t_stat is not None else "—"
+    ic_str        = f"{ic_val:,}"              if ic_val   is not None else "—"
+    ittv_str      = f"${ittv_val:,.0f}"        if ittv_val is not None else "—"
+    req_n_str     = f"{required_n:,}"          if required_n is not None else "—"
+    exp_ic_str    = f"{exp_ic:,}"              if exp_ic   is not None else "—"
+    exp_ittv_str  = f"${exp_ittv:,.0f}"        if exp_ittv is not None else "—"
+
     # ── Section 2: Business impact ────────────────────────────────────────────
     st.markdown('<div class="eyebrow" style="margin:18px 0 8px 0;">2 · Business Impact</div>',
                 unsafe_allow_html=True)
 
     impact_cols = st.columns(4)
-    ic_val  = i_customers if i_customers is not None else exp_ic
-    ittv_val = i_ttv if i_ttv is not None else exp_ittv
-    ic_label  = "iCustomers" if i_customers is not None else "Expected iCustomers"
-    ittv_label = "Incremental TTV" if i_ttv is not None else "Expected iTTV"
 
-    _stat_tile(impact_cols[0], ic_label,
-               f"{ic_val:+,}" if ic_val is not None else "—",
-               "incremental converters driven by campaign",
+    # iCustomers — show with % incremental context
+    ic_sub = (f"{incr_pct:.0f}% truly incremental · {100-incr_pct:.0f}% cannibalized"
+              if incr_pct is not None
+              else ("expected if hypothesis holds" if i_customers is None else "incremental converters"))
+    ic_display = (f"{ic_val:+,} ({incr_pct:.0f}% incr.)" if (ic_val and incr_pct)
+                  else (f"{ic_val:+,}" if ic_val is not None else "—"))
+
+    # iTTV — show with per-customer value
+    ittv_sub = (f"${per_cust:.0f} avg per iCustomer · {actual_roi:.0f}% ROI"
+                if per_cust else
+                ("projected at $163 avg TTV/conversion" if i_ttv is None else "total incremental TTV"))
+    ittv_display = (f"${abs(ittv_val):,.0f} (${per_cust:.0f}/cust)" if (ittv_val and per_cust)
+                    else (f"${abs(ittv_val):,.0f}" if ittv_val is not None else "—"))
+
+    _stat_tile(impact_cols[0], ic_label, ic_display, ic_sub,
                "#1B7E4F" if ic_val and ic_val > 0 else "#786D79")
-    _stat_tile(impact_cols[1], ittv_label,
-               f"${abs(ittv_val):,.0f}" if ittv_val is not None else "—",
-               "total transaction value generated",
+    _stat_tile(impact_cols[1], ittv_label, ittv_display, ittv_sub,
                "#1B7E4F" if ittv_val and ittv_val > 0 else "#786D79")
     _stat_tile(impact_cols[2], "Cannibalization",
-               f"{cann*100:.1f}%" if cann is not None else "—",
-               "organic share of conversions",
+               f"{cann*100:.1f}% ({incr_pct:.0f}% net-new)" if cann is not None and incr_pct else
+               (f"{cann*100:.1f}%" if cann is not None else "—"),
+               "organic share of all conversions",
                "#1B7E4F" if cann is not None and cann < 0.4 else
                "#A55A00" if cann is not None and cann < 0.6 else "#B43A3A")
-    if roi_pct is not None:
-        _stat_tile(impact_cols[3], "Fixed ROI", f"{roi_pct:.1f}%",
-                   "per incremental conversion", "#1B7E4F")
-    elif days_to_sig or required_n:
-        _stat_tile(impact_cols[3],
-                   "Days to Significance" if days_to_sig else "Required N / Arm",
-                   str(days_to_sig) if days_to_sig else f"{required_n:,}",
-                   "at current conversion rate" if days_to_sig else "for 80% power at 95% CI",
-                   "#A55A00")
-    else:
-        _stat_tile(impact_cols[3], "ROI", "424.3%", "fixed per incremental conversion", "#1B7E4F")
+    if roi_pct is not None or days_to_sig is None:
+        _stat_tile(impact_cols[3], "Fixed ROI", f"{actual_roi:.1f}%",
+                   f"${net_margin:.2f} net margin per conversion", "#1B7E4F")
+    elif days_to_sig:
+        _stat_tile(impact_cols[3], "Days to Significance", str(days_to_sig),
+                   "at current daily conversion rate", "#A55A00")
+    elif required_n:
+        _stat_tile(impact_cols[3], "Required N / Arm", req_n_str,
+                   "for 80% power at 95% CI", "#A55A00")
 
     # ── Section 3: Strategic alignment with Zip Co goals ─────────────────────
     st.markdown('<div class="eyebrow" style="margin:18px 0 8px 0;">3 · Strategic Alignment — Zip Co Growth Agenda</div>',
@@ -779,51 +800,131 @@ def render_executive_report():
 
     goal_html = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:4px;">'
     for g in ZIP_GOALS:
-        mk = g["metric"]
+        mk  = g["metric"]
         val = v.get(mk)
-        # Determine traffic light state: green / amber / red
+
         if mk == "is_sig":
             if val is True:
-                light, msg = "🟢", g["positive"]
+                light = "🟢"
+                stat_line = f"t = {t_str} → statistically confirmed"
+                msg = g["positive"]
             elif val is False:
-                light, msg = "🔴", g["negative"]
+                light = "🔴"
+                stat_line = f"t = {t_str} (need |t| > 1.96 for 95% CI)"
+                msg = g["negative"]
             else:
-                light, msg = "🟡", "Sizing mode — significance will be assessed post-launch"
+                light = "🟡"
+                stat_line = "Significance to be measured post-launch"
+                msg = "Sizing mode — significance will be assessed once the test runs"
         elif mk == "roi_pct":
-            if val is None:
-                val = 424.3  # fixed Zip Co ROI — always positive
-            light = "🟢" if val >= g["threshold"] * 2 else ("🟡" if val >= g["threshold"] else "🔴")
-            msg   = g["positive"] if val >= g["threshold"] else g["negative"]
-        else:
-            # i_customers or i_ttv — fall back to expected for sizing scenarios
-            if val is None:
-                val = v.get("expected_i_customers") if mk == "i_customers" else v.get("expected_i_ttv")
-            if val is None:
-                light, msg = "🟡", "No data yet — run the scenario to populate"
-            elif val >= g["threshold"] * 2:
-                light, msg = "🟢", g["positive"]
-            elif val >= g["threshold"]:
-                light, msg = "🟡", g["positive"]
+            display_roi = val or actual_roi
+            light = "🟢"
+            stat_line = f"{display_roi:.1f}% ROI · ${net_margin:.2f} net per incremental conversion"
+            msg = g["positive"]
+        elif mk == "i_customers":
+            ic_use = val if val is not None else v.get("expected_i_customers")
+            if ic_use is None:
+                light, stat_line, msg = "🟡", "No data yet", "Run the scenario to populate"
             else:
-                light, msg = "🔴", g["negative"]
+                pct_incr = f" ({incr_pct:.0f}% truly incremental)" if incr_pct else ""
+                light = "🟢" if ic_use >= g["threshold"] * 2 else ("🟡" if ic_use >= g["threshold"] else "🔴")
+                stat_line = f"+{ic_use:,} iCustomers{pct_incr}"
+                msg = g["positive"] if ic_use >= g["threshold"] else g["negative"]
+        elif mk == "i_ttv":
+            ittv_use = val if val is not None else v.get("expected_i_ttv")
+            if ittv_use is None:
+                light, stat_line, msg = "🟡", "No data yet", "Run the scenario to populate"
+            else:
+                pc_str = f" (${per_cust:.0f}/iCustomer)" if per_cust else ""
+                light = "🟢" if ittv_use >= g["threshold"] * 2 else ("🟡" if ittv_use >= g["threshold"] else "🔴")
+                stat_line = f"+${ittv_use:,.0f} iTTV{pc_str}"
+                msg = g["positive"] if ittv_use >= g["threshold"] else g["negative"]
+        else:
+            light, stat_line, msg = "🟡", "—", g["positive"]
 
         goal_html += f"""
         <div style="background:#FFFFFF;border:1px solid #E1E0DF;border-radius:10px;padding:12px 14px;">
           <div style="font-size:1.1rem;margin-bottom:4px;">{light}</div>
-          <div style="font-size:0.72rem;font-weight:700;color:#1A0725;margin-bottom:3px;">
+          <div style="font-size:0.72rem;font-weight:700;color:#1A0725;margin-bottom:2px;">
             {g['icon']} {g['goal']}
           </div>
-          <div style="font-size:0.68rem;color:#786D79;margin-bottom:6px;">{g['desc']}</div>
-          <div style="font-size:0.74rem;font-weight:600;color:#411260;">{msg}</div>
+          <div style="font-size:0.78rem;font-weight:700;color:#411260;margin-bottom:4px;">{stat_line}</div>
+          <div style="font-size:0.68rem;color:#786D79;">{msg}</div>
         </div>"""
     goal_html += "</div>"
     st.markdown(goal_html, unsafe_allow_html=True)
 
-    # ── Section 4: Next steps ─────────────────────────────────────────────────
+    # ── Section 4: Data-driven next steps ─────────────────────────────────────
     st.markdown('<div class="eyebrow" style="margin:18px 0 8px 0;">4 · Recommended Next Steps</div>',
                 unsafe_allow_html=True)
 
-    steps = NEXT_STEPS.get(rec, NEXT_STEPS.get("WATCH", []))
+    # Generate steps with actual numbers
+    def _steps_for_rec(rec: str) -> list[str]:
+        if rec == "SCALE":
+            return [
+                f"📣 Scale budget to the full eligible audience — at {actual_roi:.0f}% ROI, each additional activation returns <b>${net_margin:.2f} net margin</b>",
+                f"💰 Current result: <b>{ic_str} iCustomers</b>, <b>{ittv_str} iTTV</b> ({incr_pct:.0f}% truly incremental) — proportional scaling should multiply these figures",
+                f"🤝 Share <b>t = {t_str}</b> result with brand partner — {confidence} confidence is the data package needed to unlock the next co-marketing budget cycle",
+                f"📊 Set <b>{confidence} CI</b> (t = {t_stat:.3f if t_stat else '—'}) as the performance benchmark — reject any future test that doesn't clear this bar",
+                f"🎯 Seed v2 look-alike audience from the <b>{ic_str} incremental converters</b> ({incr_pct:.0f}% of all conversions were net-new, {100-incr_pct:.0f}% cannibalized)" if incr_pct else
+                f"🎯 Seed v2 look-alike audience from the {ic_str} incremental converters to target the highest-propensity customers",
+            ]
+        if rec == "GREENLIGHT":
+            return [
+                f"🚀 Launch — you need <b>{req_n_str} per arm</b> ({required_n*2:,} total) to detect the target lift with 80% power at 95% CI" if required_n else
+                "🚀 Launch the test — well-powered with a clear, measurable hypothesis",
+                f"📅 Schedule the mid-point check at <b>day {(days_to_sig or 22) // 2}</b> — if |t| < 1.0 at that point, prepare to stop early",
+                f"📊 Set a significance alert at |t| = <b>1.645 (90% CI)</b> as early signal; call the test at <b>1.96 (95% CI)</b>",
+                f"🎯 If hypothesis holds: expect <b>+{exp_ic_str} iCustomers</b> and <b>+{exp_ittv_str} iTTV</b> over ~{days_to_sig or 22} days" if (exp_ic or exp_ittv) else
+                f"🎯 Document expected lift %: align with partner on success metrics before launch to avoid post-hoc disputes",
+                "🔒 Lock audience on day 1 — no additions or removals after go-live; it invalidates the significance calculation",
+            ]
+        if rec == "EXTEND":
+            return [
+                f"⏳ Extend <b>7–14 more days</b> — current t = <b>{t_str}</b>, needs 1.96 for 95% CI; signal is directionally positive",
+                f"📊 Monitor t-statistic daily — stop early and call <b>SCALE</b> the moment it crosses 1.96 (don't wait for planned end date)",
+                f"📅 Set a hard stop date: if t-stat hasn't moved by day +14, reclassify as <b>STOP</b> — don't let sunk-cost bias extend indefinitely",
+                f"👥 Do <b>not</b> add new users mid-test — it resets the variance calculation and inflates the required sample size",
+                f"🔍 Check for audience bleed: verify no overlapping campaigns are hitting the <b>control arm</b> in this segment",
+            ]
+        if rec == "STOP":
+            n_days = days_to_sig or 608
+            opp_cost = int(n_days * (ittv_val / 14 if ittv_val else 3200))
+            return [
+                f"🛑 Stop now — t = <b>{t_str}</b>, would need ~<b>{n_days} more days</b> at this effect size to reach significance",
+                f"💰 Opportunity cost of running to planned end date: ~<b>${opp_cost:,.0f}</b> in foregone iTTV that could fund a winning concept",
+                f"🔄 Redirect this audience (currently at <b>{ic_str} iCustomers</b>) to the highest-performing campaign in the portfolio",
+                f"📝 Document the null result: this segment's baseline CVR is near its ceiling — the offer mechanic isn't the unlock",
+                f"📊 Archive t = {t_str} as the negative benchmark; require any replacement test to show |t| > 0.8 within 7 days as a viability gate",
+            ]
+        if rec in ("RETHINK",):
+            return [
+                f"⚠️ Hypothesis needs revision — treatment underperformed control at t = <b>{t_str}</b>",
+                f"🎯 Audit targeting: the {ic_str} negative iCustomers signal suggests the offer may be repelling otherwise-converting customers",
+                f"💡 Workshop a higher-value offer: if current mechanic doesn't clear {confidence} CI, try a {actual_roi:.0f}%+ ROI-preserving alternative",
+                f"📊 Run a diagnostic holdout for 3 days with a new creative variant before committing to a full retest",
+                f"🔄 Pause all scaling plans — do not invest further until a revised hypothesis clears at least <b>90% CI (t > 1.645)</b>",
+            ]
+        if rec == "SIZE_AND_LAUNCH":
+            return [
+                f"📐 Validate sizing: <b>{req_n_str} per arm</b> ({required_n*2:,} total) for 80% power at 95% CI, ~<b>{days_to_sig or 22} days</b> to significance" if required_n else
+                "📐 Confirm sample size calculation with the data science team before launch",
+                f"🎯 Expected outcome if hypothesis holds: <b>+{exp_ic_str} iCustomers</b>, <b>+{exp_ittv_str} iTTV</b> at {actual_roi:.0f}% ROI",
+                f"📅 Book the test slot in the campaign calendar — avoid BFCM, major holidays, or any concurrent campaign touching this segment",
+                f"🔒 Brief the Braze team on holdout group configuration — the <b>{required_n:,}-per-arm</b> split must be enforced on day 1" if required_n else
+                "🔒 Brief Braze on holdout group configuration before go-live",
+                f"📊 Agree on the primary metric and success threshold before launch — propose <b>95% CI (t > 1.96)</b> as the call criterion",
+            ]
+        # Default: WATCH / ITERATE
+        return [
+            f"👀 Monitor daily — current t = <b>{t_str}</b>; no action until signal emerges",
+            f"📊 Review rolling 7-day CVR delta each morning; escalate if it hasn't moved by day 14",
+            f"🔍 Ensure control group isolation — verify no other campaigns are touching the same audience segment",
+            f"📅 Set a review date: escalate to <b>ITERATE</b> (redesign offer) if still no signal after 14 days",
+            f"📝 Capture the current baseline as the benchmark for any future test in this segment",
+        ]
+
+    steps = _steps_for_rec(rec)
     rec_color = ("#1B7E4F" if rec in ("SCALE","GREENLIGHT") else
                  "#A55A00" if rec in ("EXTEND","ITERATE","WATCH","SIZE_AND_LAUNCH") else
                  "#B43A3A")
@@ -840,7 +941,7 @@ def render_executive_report():
       </div>
       <ol style="margin:0;padding-left:18px;">"""
     for step in steps:
-        steps_html += f'<li style="margin:6px 0;font-size:0.82rem;color:#1A0725;line-height:1.5;">{step}</li>'
+        steps_html += f'<li style="margin:7px 0;font-size:0.82rem;color:#1A0725;line-height:1.55;">{step}</li>'
     steps_html += "</ol></div>"
     st.markdown(steps_html, unsafe_allow_html=True)
 
