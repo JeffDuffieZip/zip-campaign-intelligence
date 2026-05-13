@@ -367,6 +367,106 @@ SCENARIOS = [
     },
 ]
 
+# ── Zip Co strategic goals (for executive report tab) ────────────────────────
+
+ZIP_GOALS = [
+    {
+        "icon": "📱",
+        "goal": "App Growth",
+        "desc": "Drive incremental app installs and first purchases through co-marketing",
+        "metric": "i_customers",
+        "threshold": 50,
+        "positive": "Contributes to new app customer activation targets",
+        "negative": "Insufficient volume — review segment targeting or offer structure",
+    },
+    {
+        "icon": "💰",
+        "goal": "TTV & Revenue",
+        "desc": "Increase total transaction value through incremental customer activation",
+        "metric": "i_ttv",
+        "threshold": 10_000,
+        "positive": "Meaningful TTV contribution — supports quarterly GMV targets",
+        "negative": "Insufficient TTV lift — consider higher AOV or broader segments",
+    },
+    {
+        "icon": "📈",
+        "goal": "NTM Efficiency",
+        "desc": "Deliver positive net transaction margin on every incremental conversion",
+        "metric": "roi_pct",
+        "threshold": 100,
+        "positive": "Unit economics confirmed — strong positive ROI per conversion",
+        "negative": "ROI at risk — review incentive cost relative to conversion yield",
+    },
+    {
+        "icon": "🤝",
+        "goal": "Partner Confidence",
+        "desc": "Prove brand partner co-marketing ROI to secure next campaign budget cycle",
+        "metric": "is_sig",
+        "threshold": True,
+        "positive": "Statistical significance gives partners a data-backed case to reinvest",
+        "negative": "Without significance, next partner cycle budget will be difficult to secure",
+    },
+]
+
+NEXT_STEPS = {
+    "SCALE": [
+        "📣 Expand to full eligible audience — remove holdout, push to all qualified customers",
+        "💰 Increase campaign budget proportionally to capture full audience at same ROI",
+        "🤝 Share results deck with brand partner — strong ROI case for next co-marketing cycle",
+        "📊 Set up ongoing monthly CVR tracking with this campaign as the new benchmark",
+        "🎯 Build a look-alike audience from converters for v2 targeting",
+    ],
+    "GREENLIGHT": [
+        "🚀 Launch the campaign — test is well-powered with a clear, testable hypothesis",
+        "📅 Schedule a mid-point check at day 11 to assess early CVR signal",
+        "📊 Set a significance alert: notify the team when |t-stat| crosses 1.645 (90% CI)",
+        "🔒 Lock the audience on day 1 — no additions after go-live to maintain arm integrity",
+        "📝 Document the baseline CVR before launch so the control arm is clean",
+    ],
+    "EXTEND": [
+        "⏳ Extend the run window by 7–14 days — directional signal is positive, needs more time",
+        "📊 Monitor t-statistic daily — stop early and call SCALE if it crosses 1.96",
+        "👥 Do NOT add new users mid-test — it dilutes the significance calculation",
+        "🔍 Check for cannibalization from concurrent campaigns running in the same segment",
+        "📅 Set a hard stop date: if t-stat hasn't moved by day +14, re-evaluate the hypothesis",
+    ],
+    "ITERATE": [
+        "✏️ Redesign the offer mechanic — current incentive may not be compelling enough",
+        "🎯 Test a higher discount or cashback tier to unlock conversion in this segment",
+        "📊 Run a new test with updated creative, measured against this baseline as control",
+        "🔄 Consider a different audience segment — this cohort may be price-insensitive",
+        "📝 Document learnings: what the data reveals about segment offer elasticity",
+    ],
+    "WATCH": [
+        "👀 Monitor daily for the next 5 days — no action yet, let the test breathe",
+        "📊 Review the 7-day rolling CVR delta every morning; escalate if no movement",
+        "🔍 Ensure control group isolation — no other campaigns touching the same audience",
+        "📅 Set a review date: if still no signal at 14 days, escalate to ITERATE",
+        "📝 Capture baseline engagement metrics now for future comparison",
+    ],
+    "RETHINK": [
+        "⚠️ Hypothesis needs revision — treatment underperformed control",
+        "🎯 Audit the targeting: are we reaching the right customers at the right moment?",
+        "💡 Workshop alternative offer structures with marketing and product teams",
+        "📊 Analyse the control group's natural CVR — it may be unusually elevated",
+        "🔄 Pause scaling plans — retest with revised hypothesis before committing further budget",
+    ],
+    "STOP": [
+        "🛑 Stop the campaign — effect size is too small to ever reach significance",
+        "💰 Reallocate budget to SCALE-ready campaigns in the current portfolio",
+        "📝 Document the null result — it's a signal that this offer/segment doesn't pair well",
+        "🎯 Review the targeting hypothesis: this segment may not respond to this offer type",
+        "📊 Archive test parameters as a negative benchmark for future experiment design",
+    ],
+    "SIZE_AND_LAUNCH": [
+        "📐 Validate the sample size calculation with your data science team before launch",
+        "🗓️ Book the test slot in the campaign calendar — avoid seasonal or promotional overlap",
+        "🔒 Brief the Braze team on holdout group configuration before go-live",
+        "📊 Set up the measurement framework before launch, not after — agree on the primary metric",
+        "🤝 Align with the brand partner on test timeline and reporting cadence",
+    ],
+}
+
 # ── Session state ─────────────────────────────────────────────────────────────
 
 if "messages" not in st.session_state:
@@ -539,6 +639,216 @@ def render_verdict_panel():
         st.markdown(html, unsafe_allow_html=True)
 
 
+def render_executive_report():
+    """Executive summary report tab — what we did, results, and what's next."""
+    v = st.session_state.verdict
+    msgs = st.session_state.messages
+
+    if not v:
+        st.markdown("""
+        <div class="empty-state" style="margin-top:18px;">
+          <div class="empty-state-mark">📋</div>
+          <div class="eyebrow" style="margin-bottom:6px;">No Report Yet</div>
+          <div style="font-size:1.1rem;color:#1A0725;font-weight:700;">Run a campaign scenario first</div>
+          <div style="font-size:0.82rem;margin-top:8px;color:#786D79;">
+            Click any scenario button above, then switch back here for your executive report.
+          </div>
+        </div>""", unsafe_allow_html=True)
+        return
+
+    # ── Pull context ──────────────────────────────────────────────────────────
+    rec          = v.get("recommendation", "")
+    is_sig       = v.get("is_sig")
+    t_stat       = v.get("t_stat")
+    confidence   = v.get("confidence", "")
+    i_customers  = v.get("i_customers")
+    i_ttv        = v.get("i_ttv")
+    cann         = v.get("cannibalization")
+    campaign_name = v.get("campaign_name", "")
+    days_to_sig  = v.get("days_to_sig")
+    required_n   = v.get("required_n")
+    roi_pct      = v.get("roi_pct")
+    exp_ic       = v.get("expected_i_customers")
+    exp_ittv     = v.get("expected_i_ttv")
+
+    # Infer campaign stage
+    if rec in ("SIZE_AND_LAUNCH", "GREENLIGHT"):
+        stage, stage_icon, stage_color = "Pre-Campaign", "📋", "#6442BD"
+    elif is_sig is False and t_stat is not None:
+        stage, stage_icon, stage_color = "During Campaign", "📡", "#A55A00"
+    else:
+        stage, stage_icon, stage_color = "Post-Campaign", "✅", "#1B7E4F"
+
+    # Last question as context
+    last_q = next((m["content"] for m in reversed(msgs) if m["role"] == "user"
+                   and isinstance(m["content"], str)), "")
+
+    from datetime import date
+    today = date.today().strftime("%B %d, %Y")
+
+    # ── Report header ─────────────────────────────────────────────────────────
+    st.markdown(f"""
+    <div style="background:#FFFFFF;border:1px solid #E1E0DF;border-radius:14px;
+                padding:22px 28px;margin-bottom:18px;
+                box-shadow:0 1px 3px rgba(26,7,37,0.06);">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+        <div>
+          <div class="eyebrow">Zip Co · Growth Analytics</div>
+          <div style="font-size:1.25rem;font-weight:800;color:#1A0725;margin:4px 0 2px 0;
+                      letter-spacing:-0.4px;">📋 Executive Campaign Report</div>
+          <div style="color:#786D79;font-size:0.78rem;">Generated {today} · Campaign Intelligence Agent</div>
+        </div>
+        <div style="text-align:right;">
+          <span style="background:{stage_color}18;color:{stage_color};border:1px solid {stage_color};
+                       padding:5px 12px;border-radius:20px;font-size:0.7rem;font-weight:700;
+                       letter-spacing:0.8px;">{stage_icon} {stage.upper()}</span>
+        </div>
+      </div>
+      {f'<div style="margin-top:12px;padding:10px 14px;background:#F5F4F2;border-radius:8px;font-size:0.8rem;color:#786D79;font-style:italic;">&ldquo;{last_q[:200]}{"…" if len(last_q)>200 else ""}&rdquo;</div>' if last_q else ""}
+    </div>""", unsafe_allow_html=True)
+
+    # ── Section 1: Statistical results ───────────────────────────────────────
+    st.markdown('<div class="eyebrow" style="margin-bottom:8px;">1 · Statistical Results</div>',
+                unsafe_allow_html=True)
+
+    sig_color = "#1B7E4F" if is_sig else ("#A55A00" if is_sig is False else "#786D79")
+    sig_label = "✅ SIGNIFICANT" if is_sig else ("⏳ NOT YET SIGNIFICANT" if is_sig is False else "📐 SIZING MODE")
+
+    stat_cols = st.columns(4)
+    def _stat_tile(col, label, value, sub="", color="#1A0725"):
+        col.markdown(f"""
+        <div class="metric-box">
+          <div class="metric-label">{label}</div>
+          <div class="metric-value" style="color:{color};">{value}</div>
+          <div class="metric-sub">{sub}</div>
+        </div>""", unsafe_allow_html=True)
+
+    _stat_tile(stat_cols[0], "Significance", sig_label, "two-proportion Z-test", sig_color)
+    _stat_tile(stat_cols[1], "T-Statistic",
+               f"{t_stat:.3f}" if t_stat is not None else "—",
+               "need |t| > 1.96 for 95% CI",
+               "#1B7E4F" if t_stat and abs(t_stat) >= 1.96 else ("#A55A00" if t_stat else "#786D79"))
+    _stat_tile(stat_cols[2], "Confidence Level",
+               confidence or (f"~{int(min(99,max(50,abs(t_stat or 0)*40)))}%" if t_stat else "—"),
+               "of a real incremental effect")
+    _stat_tile(stat_cols[3], "Recommendation",
+               rec or "—", "based on t-stat + cannibalization",
+               "#1B7E4F" if rec in ("SCALE","GREENLIGHT") else
+               ("#A55A00" if rec in ("EXTEND","ITERATE","WATCH") else
+                "#B43A3A" if rec in ("RETHINK","STOP") else "#6442BD"))
+
+    # ── Section 2: Business impact ────────────────────────────────────────────
+    st.markdown('<div class="eyebrow" style="margin:18px 0 8px 0;">2 · Business Impact</div>',
+                unsafe_allow_html=True)
+
+    impact_cols = st.columns(4)
+    ic_val  = i_customers if i_customers is not None else exp_ic
+    ittv_val = i_ttv if i_ttv is not None else exp_ittv
+    ic_label  = "iCustomers" if i_customers is not None else "Expected iCustomers"
+    ittv_label = "Incremental TTV" if i_ttv is not None else "Expected iTTV"
+
+    _stat_tile(impact_cols[0], ic_label,
+               f"{ic_val:+,}" if ic_val is not None else "—",
+               "incremental converters driven by campaign",
+               "#1B7E4F" if ic_val and ic_val > 0 else "#786D79")
+    _stat_tile(impact_cols[1], ittv_label,
+               f"${abs(ittv_val):,.0f}" if ittv_val is not None else "—",
+               "total transaction value generated",
+               "#1B7E4F" if ittv_val and ittv_val > 0 else "#786D79")
+    _stat_tile(impact_cols[2], "Cannibalization",
+               f"{cann*100:.1f}%" if cann is not None else "—",
+               "organic share of conversions",
+               "#1B7E4F" if cann is not None and cann < 0.4 else
+               "#A55A00" if cann is not None and cann < 0.6 else "#B43A3A")
+    if roi_pct is not None:
+        _stat_tile(impact_cols[3], "Fixed ROI", f"{roi_pct:.1f}%",
+                   "per incremental conversion", "#1B7E4F")
+    elif days_to_sig or required_n:
+        _stat_tile(impact_cols[3],
+                   "Days to Significance" if days_to_sig else "Required N / Arm",
+                   str(days_to_sig) if days_to_sig else f"{required_n:,}",
+                   "at current conversion rate" if days_to_sig else "for 80% power at 95% CI",
+                   "#A55A00")
+    else:
+        _stat_tile(impact_cols[3], "ROI", "424.3%", "fixed per incremental conversion", "#1B7E4F")
+
+    # ── Section 3: Strategic alignment with Zip Co goals ─────────────────────
+    st.markdown('<div class="eyebrow" style="margin:18px 0 8px 0;">3 · Strategic Alignment — Zip Co Growth Agenda</div>',
+                unsafe_allow_html=True)
+
+    goal_html = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:4px;">'
+    for g in ZIP_GOALS:
+        mk = g["metric"]
+        val = v.get(mk)
+        if mk == "is_sig":
+            aligned = bool(val)
+        elif mk == "roi_pct":
+            aligned = val is not None and val >= g["threshold"]
+        elif val is not None:
+            aligned = val >= g["threshold"]
+        else:
+            # For sizing scenarios: treat positive expected values as aligned
+            if mk == "i_customers":
+                val = v.get("expected_i_customers")
+                aligned = val is not None and val >= g["threshold"]
+            elif mk == "i_ttv":
+                val = v.get("expected_i_ttv")
+                aligned = val is not None and val >= g["threshold"]
+            else:
+                aligned = False
+        icon_badge = "✅" if aligned else "⚠️"
+        bg = "#E8F3EC" if aligned else "#FBF2E5"
+        border = "#1B7E4F" if aligned else "#C97A1C"
+        msg = g["positive"] if aligned else g["negative"]
+        goal_html += f"""
+        <div style="background:{bg};border:1px solid {border};border-radius:10px;padding:12px 14px;">
+          <div style="font-size:0.72rem;font-weight:700;color:#1A0725;margin-bottom:4px;">
+            {g['icon']} {icon_badge} {g['goal']}
+          </div>
+          <div style="font-size:0.7rem;color:#786D79;margin-bottom:6px;">{g['desc']}</div>
+          <div style="font-size:0.75rem;font-weight:600;color:{'#1B7E4F' if aligned else '#A55A00'};">{msg}</div>
+        </div>"""
+    goal_html += "</div>"
+    st.markdown(goal_html, unsafe_allow_html=True)
+
+    # ── Section 4: Next steps ─────────────────────────────────────────────────
+    st.markdown('<div class="eyebrow" style="margin:18px 0 8px 0;">4 · Recommended Next Steps</div>',
+                unsafe_allow_html=True)
+
+    steps = NEXT_STEPS.get(rec, NEXT_STEPS.get("WATCH", []))
+    rec_color = ("#1B7E4F" if rec in ("SCALE","GREENLIGHT") else
+                 "#A55A00" if rec in ("EXTEND","ITERATE","WATCH","SIZE_AND_LAUNCH") else
+                 "#B43A3A")
+    rec_bg    = ("#E8F3EC" if rec in ("SCALE","GREENLIGHT") else
+                 "#FBF2E5" if rec in ("EXTEND","ITERATE","WATCH","SIZE_AND_LAUNCH") else
+                 "#FBEAEA")
+
+    steps_html = f"""
+    <div style="background:{rec_bg};border:1px solid {rec_color};border-radius:12px;
+                padding:16px 20px;margin-bottom:4px;">
+      <div style="font-size:0.72rem;font-weight:700;color:{rec_color};letter-spacing:0.8px;
+                  text-transform:uppercase;margin-bottom:10px;">
+        Playbook: {rec}
+      </div>
+      <ol style="margin:0;padding-left:18px;">"""
+    for step in steps:
+        steps_html += f'<li style="margin:6px 0;font-size:0.82rem;color:#1A0725;line-height:1.5;">{step}</li>'
+    steps_html += "</ol></div>"
+    st.markdown(steps_html, unsafe_allow_html=True)
+
+    # ── Footer ────────────────────────────────────────────────────────────────
+    st.markdown(f"""
+    <div style="margin-top:18px;padding:12px 16px;border-top:1px solid #E1E0DF;
+                display:flex;justify-content:space-between;align-items:center;">
+      <div style="font-size:0.7rem;color:#8B858E;">
+        Zip Co · Growth Analytics · Campaign Intelligence Agent · {today}
+      </div>
+      <div style="font-size:0.7rem;color:#8B858E;">
+        Data: 40 Braze BAU campaigns · Two-proportion Z-test · 95% CI threshold
+      </div>
+    </div>""", unsafe_allow_html=True)
+
+
 # ── Layout ────────────────────────────────────────────────────────────────────
 
 st.markdown("""
@@ -567,9 +877,12 @@ for col, sc in zip([c1, c2, c3, c4, c5], SCENARIOS):
 
 st.markdown("<hr>", unsafe_allow_html=True)
 
-left, right = st.columns([3, 1], gap="large")
+tab_chat, tab_report = st.tabs(["💬 Campaign Analysis", "📋 Executive Report"])
 
-with right:
+with tab_chat:
+  left, right = st.columns([3, 1], gap="large")
+
+  with right:
     render_verdict_panel()
     use_mock = os.getenv("USE_MOCK_DATA", "").lower() == "true" or not os.getenv("TABLEAU_PAT_NAME")
     dot_color = '#1B7E4F' if not use_mock else '#6442BD'
@@ -587,176 +900,178 @@ with right:
       </div>
     </div>""", unsafe_allow_html=True)
 
-with left:
-    # ── INPUT: moved to TOP, sticky-feeling location ────────────────────────
-    inp_col, btn_col = st.columns([5, 1])
-    with inp_col:
-        user_input = st.text_input("", key="chat_input",
-                                   placeholder="Ask about any campaign, stat sig, sizing…",
-                                   label_visibility="collapsed")
-    with btn_col:
-        send = st.button("Send ↑", key="send_btn")
+  with left:
+      # ── INPUT: moved to TOP, sticky-feeling location ──────────────────────
+      inp_col, btn_col = st.columns([5, 1])
+      with inp_col:
+          user_input = st.text_input("", key="chat_input",
+                                     placeholder="Ask about any campaign, stat sig, sizing…",
+                                     label_visibility="collapsed")
+      with btn_col:
+          send = st.button("Send ↑", key="send_btn")
 
-    # Resolve which question to run this turn (button click or scenario button)
-    question = st.session_state.pop("pending_question", None) or (
-        user_input.strip() if send and user_input.strip() else None
-    )
+      # Resolve which question to run this turn (button click or scenario button)
+      question = st.session_state.pop("pending_question", None) or (
+          user_input.strip() if send and user_input.strip() else None
+      )
 
-    # If a new question was just asked, push it into messages BEFORE rendering
-    # so it appears immediately in the (reversed) history with a streaming slot.
-    if question:
-        st.session_state.messages.append({"role": "user", "content": question})
+      # If a new question was just asked, push it into messages BEFORE rendering
+      # so it appears immediately in the (reversed) history with a streaming slot.
+      if question:
+          st.session_state.messages.append({"role": "user", "content": question})
 
-    # Small controls row: turn count + clear-history
-    if st.session_state.messages:
-        hdr_a, hdr_b = st.columns([4, 1])
-        with hdr_a:
-            n_turns = sum(1 for m in st.session_state.messages if m["role"] == "user")
-            st.markdown(
-                f'<div style="margin:14px 0 6px 0;"><span class="eyebrow">Chat history · {n_turns} turn{"s" if n_turns != 1 else ""} · newest on top</span></div>',
-                unsafe_allow_html=True,
-            )
-        with hdr_b:
-            if st.button("Clear", key="clear_btn"):
-                st.session_state.messages = []
-                st.session_state.verdict  = {}
-                st.session_state.active_scenario = None
-                st.rerun()
+      # Small controls row: turn count + clear-history
+      if st.session_state.messages:
+          hdr_a, hdr_b = st.columns([4, 1])
+          with hdr_a:
+              n_turns = sum(1 for m in st.session_state.messages if m["role"] == "user")
+              st.markdown(
+                  f'<div style="margin:14px 0 6px 0;"><span class="eyebrow">Chat history · {n_turns} turn{"s" if n_turns != 1 else ""} · newest on top</span></div>',
+                  unsafe_allow_html=True,
+              )
+          with hdr_b:
+              if st.button("Clear", key="clear_btn"):
+                  st.session_state.messages = []
+                  st.session_state.verdict  = {}
+                  st.session_state.active_scenario = None
+                  st.rerun()
 
-    # ── Render messages, NEWEST TURN FIRST ───────────────────────────────────
-    if not st.session_state.messages:
-        st.markdown("""
-        <div class="empty-state" style="margin-top:18px;">
-          <div class="empty-state-mark">Z</div>
-          <div class="eyebrow" style="margin-bottom:6px;">Ready</div>
-          <div style="font-size:1.1rem;color:#1A0725;font-weight:700;">
-            Ask about any Braze campaign
-          </div>
-          <div style="font-size:0.82rem;margin-top:8px;color:#786D79;">
-            Click a scenario above or type a question in the box above
-          </div>
-        </div>""", unsafe_allow_html=True)
-    else:
-        # Group messages into turns: each user message starts a new turn
-        turns: list[list[dict]] = []
-        current: list[dict] = []
-        for m in st.session_state.messages:
-            if m["role"] == "user":
-                if current:
-                    turns.append(current)
-                current = [m]
-            else:
-                current.append(m)
-        if current:
-            turns.append(current)
+      # ── Render messages, NEWEST TURN FIRST ─────────────────────────────────
+      if not st.session_state.messages:
+          st.markdown("""
+          <div class="empty-state" style="margin-top:18px;">
+            <div class="empty-state-mark">Z</div>
+            <div class="eyebrow" style="margin-bottom:6px;">Ready</div>
+            <div style="font-size:1.1rem;color:#1A0725;font-weight:700;">
+              Ask about any Braze campaign
+            </div>
+            <div style="font-size:0.82rem;margin-top:8px;color:#786D79;">
+              Click a scenario above or type a question in the box above
+            </div>
+          </div>""", unsafe_allow_html=True)
+      else:
+          # Group messages into turns: each user message starts a new turn
+          turns: list[list[dict]] = []
+          current: list[dict] = []
+          for m in st.session_state.messages:
+              if m["role"] == "user":
+                  if current:
+                      turns.append(current)
+                  current = [m]
+              else:
+                  current.append(m)
+          if current:
+              turns.append(current)
 
-        # Stream-placeholder context for the *newest* turn if we just received a question
-        stream_ctx: dict | None = None
+          # Stream-placeholder context for the *newest* turn if we just received a question
+          stream_ctx: dict | None = None
 
-        # Render newest first
-        for idx_rev, turn in enumerate(reversed(turns)):
-            is_newest    = (idx_rev == 0)
-            turn_number  = len(turns) - idx_rev
-            has_assistant = any(m["role"] == "assistant" for m in turn)
+          # Render newest first
+          for idx_rev, turn in enumerate(reversed(turns)):
+              is_newest     = (idx_rev == 0)
+              turn_number   = len(turns) - idx_rev
+              has_assistant = any(m["role"] == "assistant" for m in turn)
 
-            # Turn divider (above every non-newest turn)
-            if idx_rev > 0:
-                st.markdown(
-                    '<hr style="border:none;border-top:1px dashed #D6D4D2;margin:22px 0 16px 0;">',
-                    unsafe_allow_html=True,
-                )
-            # Turn label
-            label_color = "#6442BD" if is_newest else "#8B858E"
-            label_text = f"Turn {turn_number}" + ("  ·  newest" if is_newest else "")
-            st.markdown(
-                f'<div style="color:{label_color};font-size:0.62rem;font-weight:700;'
-                f'letter-spacing:1.4px;text-transform:uppercase;margin:4px 0 6px 0;">'
-                f'{label_text}</div>',
-                unsafe_allow_html=True,
-            )
+              # Turn divider (above every non-newest turn)
+              if idx_rev > 0:
+                  st.markdown(
+                      '<hr style="border:none;border-top:1px dashed #D6D4D2;margin:22px 0 16px 0;">',
+                      unsafe_allow_html=True,
+                  )
+              # Turn label
+              label_color = "#6442BD" if is_newest else "#8B858E"
+              label_text  = f"Turn {turn_number}" + ("  ·  newest" if is_newest else "")
+              st.markdown(
+                  f'<div style="color:{label_color};font-size:0.62rem;font-weight:700;'
+                  f'letter-spacing:1.4px;text-transform:uppercase;margin:4px 0 6px 0;">'
+                  f'{label_text}</div>',
+                  unsafe_allow_html=True,
+              )
 
-            # Render messages within the turn (user first, then assistant)
-            for m in turn:
-                if m["role"] == "user":
-                    content = m["content"] if isinstance(m["content"], str) else str(m["content"])
-                    st.markdown(f'<div class="msg-user">{content}</div>', unsafe_allow_html=True)
-                elif m["role"] == "assistant":
-                    if isinstance(m["content"], list):
-                        for block in m["content"]:
-                            if isinstance(block, dict):
-                                if block.get("type") == "text" and block.get("text"):
-                                    st.markdown(
-                                        f'<div class="msg-agent">{render_md(block["text"])}</div>',
-                                        unsafe_allow_html=True,
-                                    )
-                                elif block.get("type") == "tool_use":
-                                    render_tool_pill(block["name"], block.get("input", {}))
-                    elif isinstance(m["content"], str):
-                        st.markdown(
-                            f'<div class="msg-agent">{render_md(m["content"])}</div>',
-                            unsafe_allow_html=True,
-                        )
+              # Render messages within the turn (user first, then assistant)
+              for m in turn:
+                  if m["role"] == "user":
+                      content = m["content"] if isinstance(m["content"], str) else str(m["content"])
+                      st.markdown(f'<div class="msg-user">{content}</div>', unsafe_allow_html=True)
+                  elif m["role"] == "assistant":
+                      if isinstance(m["content"], list):
+                          for block in m["content"]:
+                              if isinstance(block, dict):
+                                  if block.get("type") == "text" and block.get("text"):
+                                      st.markdown(
+                                          f'<div class="msg-agent">{render_md(block["text"])}</div>',
+                                          unsafe_allow_html=True,
+                                      )
+                                  elif block.get("type") == "tool_use":
+                                      render_tool_pill(block["name"], block.get("input", {}))
+                      elif isinstance(m["content"], str):
+                          st.markdown(
+                              f'<div class="msg-agent">{render_md(m["content"])}</div>',
+                              unsafe_allow_html=True,
+                          )
 
-            # If this is the newest turn AND there's no assistant response yet,
-            # create the streaming placeholder right here.
-            if is_newest and not has_assistant and question:
-                stream_ctx = {"placeholder": st.empty()}
+              # If this is the newest turn AND there's no assistant response yet,
+              # create the streaming placeholder right here.
+              if is_newest and not has_assistant and question:
+                  stream_ctx = {"placeholder": st.empty()}
 
-# ── Streaming dispatch (only when we have a pending question + placeholder) ──
+      # ── Streaming dispatch ────────────────────────────────────────────────
+      if question and stream_ctx is not None:
+          agent_msgs = []
+          for m in st.session_state.messages:
+              if m["role"] == "user":
+                  agent_msgs.append({
+                      "role": "user",
+                      "content": m["content"] if isinstance(m["content"], str) else str(m["content"]),
+                  })
+              elif m["role"] == "assistant":
+                  txt = ""
+                  if isinstance(m["content"], list):
+                      txt = " ".join(b.get("text", "") for b in m["content"]
+                                     if isinstance(b, dict) and b.get("type") == "text")
+                  elif isinstance(m["content"], str):
+                      txt = m["content"]
+                  if txt:
+                      agent_msgs.append({"role": "assistant", "content": txt})
 
-if question and stream_ctx is not None:
-    # Build agent history (excluding the just-appended user message handled separately)
-    agent_msgs = []
-    for m in st.session_state.messages:
-        if m["role"] == "user":
-            agent_msgs.append({
-                "role": "user",
-                "content": m["content"] if isinstance(m["content"], str) else str(m["content"]),
-            })
-        elif m["role"] == "assistant":
-            txt = ""
-            if isinstance(m["content"], list):
-                txt = " ".join(b.get("text", "") for b in m["content"]
-                               if isinstance(b, dict) and b.get("type") == "text")
-            elif isinstance(m["content"], str):
-                txt = m["content"]
-            if txt:
-                agent_msgs.append({"role": "assistant", "content": txt})
+          placeholder = stream_ctx["placeholder"]
+          accumulated = ""
+          tool_results_turn: list[str] = []
+          tool_calls_turn:   list[dict] = []
 
-    placeholder = stream_ctx["placeholder"]
-    accumulated = ""
-    tool_results_turn: list[str] = []
-    tool_calls_turn:   list[dict] = []
+          placeholder.markdown(
+              '<div class="msg-agent" style="color:#786D79;">⚡ Analysing…</div>',
+              unsafe_allow_html=True,
+          )
 
-    placeholder.markdown(
-        '<div class="msg-agent" style="color:#786D79;">⚡ Analysing…</div>',
-        unsafe_allow_html=True,
-    )
+          for event in stream_response(agent_msgs):
+              if event["type"] == "text":
+                  accumulated += event["text"]
+                  placeholder.markdown(
+                      f'<div class="msg-agent">{render_md(accumulated)}'
+                      f'<span style="color:#6442BD">▌</span></div>',
+                      unsafe_allow_html=True,
+                  )
+              elif event["type"] == "tool_use":
+                  tool_calls_turn.append(event)
+              elif event["type"] == "tool_result":
+                  tool_results_turn.append(event["result"])
+              elif event["type"] == "done":
+                  placeholder.markdown(
+                      f'<div class="msg-agent">{render_md(accumulated)}</div>',
+                      unsafe_allow_html=True,
+                  )
 
-    for event in stream_response(agent_msgs):
-        if event["type"] == "text":
-            accumulated += event["text"]
-            placeholder.markdown(
-                f'<div class="msg-agent">{render_md(accumulated)}'
-                f'<span style="color:#6442BD">▌</span></div>',
-                unsafe_allow_html=True,
-            )
-        elif event["type"] == "tool_use":
-            tool_calls_turn.append(event)
-        elif event["type"] == "tool_result":
-            tool_results_turn.append(event["result"])
-        elif event["type"] == "done":
-            placeholder.markdown(
-                f'<div class="msg-agent">{render_md(accumulated)}</div>',
-                unsafe_allow_html=True,
-            )
+          # Save assistant response
+          blocks = [{"type": "tool_use", "name": tc["name"], "input": tc["input"]}
+                    for tc in tool_calls_turn]
+          if accumulated:
+              blocks.append({"type": "text", "text": accumulated})
+          st.session_state.messages.append({"role": "assistant", "content": blocks or accumulated})
+          st.session_state.verdict = extract_verdict(accumulated, tool_results_turn)
+          st.rerun()
 
-    # Save assistant response
-    blocks = [{"type": "tool_use", "name": tc["name"], "input": tc["input"]} for tc in tool_calls_turn]
-    if accumulated:
-        blocks.append({"type": "text", "text": accumulated})
-    st.session_state.messages.append({"role": "assistant", "content": blocks or accumulated})
-    st.session_state.verdict = extract_verdict(accumulated, tool_results_turn)
-    st.rerun()
+with tab_report:
+    render_executive_report()
 
-# build-stamp: 2026-05-13 16:37 UTC
+# build-stamp: 2026-05-13 18:00 UTC
