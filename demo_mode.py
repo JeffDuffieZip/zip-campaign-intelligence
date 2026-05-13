@@ -354,6 +354,22 @@ def _handle_campaign_lookup(c: dict) -> Generator[dict, None, None]:
     t_stat = c.get("CVR_T_STAT")
     is_sig = c.get("stat_sig")
 
+    # Recommendation logic that handles None safely
+    t_num = t_stat if isinstance(t_stat, (int, float)) else None
+    icust = c.get("iCustomers") or 0
+    if t_num is None:
+        rec = "WATCH"  # no data yet
+    elif is_sig and t_num > 0 and icust > 0:
+        rec = "SCALE"
+    elif is_sig and t_num < 0:
+        rec = "RETHINK"
+    elif abs(t_num) < 0.8:
+        rec = "STOP"
+    elif abs(t_num) >= 1.5:
+        rec = "EXTEND"
+    else:
+        rec = "WATCH"
+
     enriched = {
         "campaign_name": name,
         "t_statistic": t_stat,
@@ -361,30 +377,37 @@ def _handle_campaign_lookup(c: dict) -> Generator[dict, None, None]:
         "i_customers": c.get("iCustomers"),
         "i_ttv": c.get("iTTV"),
         "cannibalization_rate": c.get("CANNIBALIZATION_RATE"),
-        "recommendation": (
-            "SCALE" if is_sig and t_stat and t_stat > 0 and (c.get("iCustomers") or 0) > 0
-            else "RETHINK" if is_sig and t_stat and t_stat < 0
-            else "STOP" if t_stat and abs(t_stat) < 0.8
-            else "EXTEND" if t_stat and abs(t_stat) >= 1.5
-            else "WATCH"
-        ),
+        "recommendation": rec,
     }
     yield from _tool_call("get_campaign_details", {"campaign_name": name}, c)
     yield from _tool_call("calculate_stat_sig", {}, enriched)
 
-    p_t = c.get("CVR_TARGET", 0)
-    p_c = c.get("CVR_CONTROL", 0)
-    n_t = c.get("TARGET_AUDIENCE", 0)
-    n_c = c.get("CONTROL_AUDIENCE", 0)
+    p_t = c.get("CVR_TARGET") or 0
+    p_c = c.get("CVR_CONTROL") or 0
+    n_t = c.get("TARGET_AUDIENCE") or 0
+    n_c = c.get("CONTROL_AUDIENCE") or 0
     lift = (p_t - p_c) * 100 if p_t and p_c else 0
     rel  = ((p_t - p_c) / p_c) * 100 if p_c else 0
 
-    sig_word = "Statistically significant" if is_sig else "Not significant"
-    sig_pill = "pill-pos" if is_sig else "pill-warn"
-    sig_detail = (
-        "clears the 95% threshold of 1.96"
-        if is_sig else "below the 1.96 threshold required for 95% confidence"
-    )
+    # Normalize all numerics to safe values (None → 0)
+    t_stat_safe = t_stat if isinstance(t_stat, (int, float)) else 0
+    icust = c.get("iCustomers") or 0
+    ittv  = c.get("iTTV") or 0
+    cann  = c.get("CANNIBALIZATION_RATE") or 0
+
+    has_results = is_sig is not None and (n_t > 0 and n_c > 0)
+    if has_results:
+        sig_word = "Statistically significant" if is_sig else "Not significant"
+        sig_pill = "pill-pos" if is_sig else "pill-warn"
+        sig_detail = (
+            "clears the 95% threshold of 1.96"
+            if is_sig else "below the 1.96 threshold required for 95% confidence"
+        )
+    else:
+        sig_word = "No A/B results yet"
+        sig_pill = "pill-info"
+        sig_detail = "campaign is in-flight, planned, or has no recorded outcomes"
+
     rec = enriched["recommendation"]
     rec_pill = {
         "SCALE": "pill-pos", "EXTEND": "pill-info", "WATCH": "pill-info",
@@ -392,12 +415,13 @@ def _handle_campaign_lookup(c: dict) -> Generator[dict, None, None]:
     }.get(rec, "pill-info")
     cid = c.get("CAMPAIGN_CANVAS_ID", "")
 
-    narrative = f"""### {name}
+    # Build sections conditionally — only show results if we have them
+    header = f"""### {name}
 
 <div class="verdict-line">
   <span class="pill {sig_pill}">● {sig_word}</span>
   <span class="pill {rec_pill}">{rec}</span>
-  <span style="color:#786D79;font-size:0.78rem">t = {t_stat:.3f} · {sig_detail}</span>
+  <span style="color:#786D79;font-size:0.78rem">{f"t = {t_stat_safe:.3f} · " if has_results else ""}{sig_detail}</span>
 </div>
 
 | Field | Value |
@@ -407,7 +431,10 @@ def _handle_campaign_lookup(c: dict) -> Generator[dict, None, None]:
 | Segment | {c.get('segment', 'BAU')} |
 | Launch date | {c.get('CAMPAIGN_LAUNCH_DATE', '—')} |
 | Canvas ID | `{cid}` |
+"""
 
+    if has_results:
+        perf_section = f"""
 #### Performance
 
 | Arm | Audience | CVR | Conversions |
@@ -420,12 +447,28 @@ def _handle_campaign_lookup(c: dict) -> Generator[dict, None, None]:
 
 | Metric | Value |
 |---|---|
-| Incremental customers | **{c.get('iCustomers', 0):+,}** |
-| Incremental TTV | **${c.get('iTTV', 0):+,.0f}** |
-| Cannibalization rate | {(c.get('CANNIBALIZATION_RATE') or 0)*100:.1f}% |
+| Incremental customers | **{icust:+,}** |
+| Incremental TTV | **${ittv:+,.0f}** |
+| Cannibalization rate | {cann*100:.1f}% |
 
 > {sig_word} at the 95% threshold. **Recommendation: {rec}.**
 """
+    else:
+        # In-flight or planned campaign — show what we have
+        target_aud = c.get("TARGET_AUDIENCE") or 0
+        perf_section = f"""
+#### Audience
+
+| Metric | Value |
+|---|---|
+| Target audience | {target_aud:,} |
+| Channel | {c.get('Campaign Canvas Channel', 'EMAIL')} |
+| Conversion type | {c.get('conv_type', '—')} |
+| Conversion window | {c.get('conv_window', '—')} day(s) |
+
+> This campaign has no A/B results yet — likely in-flight, planned, or running without a control arm. **Recommendation: {rec}.** Check back once the conversion window closes.
+"""
+    narrative = header + perf_section
     yield from _stream_text(narrative)
     yield {"type": "done"}
 
@@ -578,17 +621,35 @@ def _handle_segment_baselines(segment: str = None) -> Generator[dict, None, None
 
 def _handle_comparison(text: str) -> Generator[dict, None, None]:
     """Compare two campaigns mentioned in the prompt."""
-    # Find candidate campaigns
-    matches = []
-    for c in CAMPAIGNS:
-        name = c.get("display_name", c.get("name", "")).lower()
-        name_words = set(re.findall(r"[a-z0-9]+", name))
-        text_lower = text.lower()
-        score = sum(1 for w in name_words if w in text_lower and len(w) > 2)
-        if score >= 2:
-            matches.append((score, c))
-    matches.sort(key=lambda x: -x[0])
-    top = [m[1] for m in matches[:2]]
+    # Split on 'vs', 'versus', 'and', 'to' — common comparison joiners
+    parts = re.split(r"\b(?:vs|versus|and|to|with)\b", text, flags=re.IGNORECASE)
+    parts = [p.strip() for p in parts if p.strip()]
+
+    top: list[dict] = []
+    seen_ids: set[str] = set()
+
+    # If we have 2+ parts, search each independently
+    if len(parts) >= 2:
+        for part in parts[:4]:  # check up to 4 fragments
+            hits = _find_campaigns(part, limit=2)
+            for h in hits:
+                cid = h.get("CAMPAIGN_CANVAS_ID", h.get("name"))
+                if cid not in seen_ids:
+                    top.append(h)
+                    seen_ids.add(cid)
+                    break
+            if len(top) >= 2:
+                break
+
+    # Fallback: search the whole text and take top 2 distinct campaigns
+    if len(top) < 2:
+        for c in _find_campaigns(text, limit=8):
+            cid = c.get("CAMPAIGN_CANVAS_ID", c.get("name"))
+            if cid not in seen_ids:
+                top.append(c)
+                seen_ids.add(cid)
+            if len(top) >= 2:
+                break
 
     if len(top) < 2:
         yield from _stream_text(
@@ -768,15 +829,10 @@ def stream_demo_response(messages: list[dict]) -> Generator[dict, None, None]:
                 seg = s; break
         yield from _handle_segment_baselines(seg); return
 
-    # Comparison
-    if any(k in text_lower for k in ["compare", "vs", " versus ", "head to head", "which "]):
-        # Check if comparison has 2 campaign refs
-        match_count = sum(
-            1 for c in CAMPAIGNS
-            if any(w in text_lower for w in c.get("display_name", "").lower().split() if len(w) > 4)
-        )
-        if match_count >= 2:
-            yield from _handle_comparison(text); return
+    # Comparison — let the handler do its own (fuzzy) matching
+    if any(k in text_lower for k in ["compare", " vs ", " versus ", "head to head",
+                                       "which performed", "which is better", "which won"]):
+        yield from _handle_comparison(text); return
 
     # Free-form stat sig (numbers provided)
     stats_inputs = _extract_stats_inputs(text)
