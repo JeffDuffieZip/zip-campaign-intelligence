@@ -531,92 +531,168 @@ with right:
     </div>""", unsafe_allow_html=True)
 
 with left:
-    # History
+    # ── INPUT: moved to TOP, sticky-feeling location ────────────────────────
+    inp_col, btn_col = st.columns([5, 1])
+    with inp_col:
+        user_input = st.text_input("", key="chat_input",
+                                   placeholder="Ask about any campaign, stat sig, sizing…",
+                                   label_visibility="collapsed")
+    with btn_col:
+        send = st.button("Send ↑", key="send_btn")
+
+    # Resolve which question to run this turn (button click or scenario button)
+    question = st.session_state.pop("pending_question", None) or (
+        user_input.strip() if send and user_input.strip() else None
+    )
+
+    # If a new question was just asked, push it into messages BEFORE rendering
+    # so it appears immediately in the (reversed) history with a streaming slot.
+    if question:
+        st.session_state.messages.append({"role": "user", "content": question})
+
+    # Small controls row: turn count + clear-history
+    if st.session_state.messages:
+        hdr_a, hdr_b = st.columns([4, 1])
+        with hdr_a:
+            n_turns = sum(1 for m in st.session_state.messages if m["role"] == "user")
+            st.markdown(
+                f'<div style="margin:14px 0 6px 0;"><span class="eyebrow">Chat history · {n_turns} turn{"s" if n_turns != 1 else ""} · newest on top</span></div>',
+                unsafe_allow_html=True,
+            )
+        with hdr_b:
+            if st.button("Clear", key="clear_btn"):
+                st.session_state.messages = []
+                st.session_state.verdict  = {}
+                st.session_state.active_scenario = None
+                st.rerun()
+
+    # ── Render messages, NEWEST TURN FIRST ───────────────────────────────────
     if not st.session_state.messages:
         st.markdown("""
-        <div class="empty-state">
+        <div class="empty-state" style="margin-top:18px;">
           <div class="empty-state-mark">Z</div>
           <div class="eyebrow" style="margin-bottom:6px;">Ready</div>
           <div style="font-size:1.1rem;color:#1A0725;font-weight:700;">
             Ask about any Braze campaign
           </div>
           <div style="font-size:0.82rem;margin-top:8px;color:#786D79;">
-            Click a scenario above or type a question below
+            Click a scenario above or type a question in the box above
           </div>
         </div>""", unsafe_allow_html=True)
     else:
-        for msg in st.session_state.messages:
-            if msg["role"] == "user":
-                content = msg["content"] if isinstance(msg["content"], str) else str(msg["content"])
-                st.markdown(f'<div class="msg-user">{content}</div>', unsafe_allow_html=True)
-            elif msg["role"] == "assistant":
-                if isinstance(msg["content"], list):
-                    for block in msg["content"]:
-                        if isinstance(block, dict):
-                            if block.get("type") == "text" and block.get("text"):
-                                st.markdown(f'<div class="msg-agent">{render_md(block["text"])}</div>', unsafe_allow_html=True)
-                            elif block.get("type") == "tool_use":
-                                render_tool_pill(block["name"], block.get("input", {}))
-                elif isinstance(msg["content"], str):
-                    st.markdown(f'<div class="msg-agent">{render_md(msg["content"])}</div>', unsafe_allow_html=True)
+        # Group messages into turns: each user message starts a new turn
+        turns: list[list[dict]] = []
+        current: list[dict] = []
+        for m in st.session_state.messages:
+            if m["role"] == "user":
+                if current:
+                    turns.append(current)
+                current = [m]
+            else:
+                current.append(m)
+        if current:
+            turns.append(current)
 
-    st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+        # Stream-placeholder context for the *newest* turn if we just received a question
+        stream_ctx: dict | None = None
 
-    inp_col, btn_col = st.columns([5, 1])
-    with inp_col:
-        user_input = st.text_input("", key="chat_input",
-                                   placeholder="Ask about any campaign, stat sig, sizing...",
-                                   label_visibility="collapsed")
-    with btn_col:
-        send = st.button("Send ↑", key="send_btn")
+        # Render newest first
+        for idx_rev, turn in enumerate(reversed(turns)):
+            is_newest    = (idx_rev == 0)
+            turn_number  = len(turns) - idx_rev
+            has_assistant = any(m["role"] == "assistant" for m in turn)
 
-# ── Dispatch ──────────────────────────────────────────────────────────────────
+            # Turn divider (above every non-newest turn)
+            if idx_rev > 0:
+                st.markdown(
+                    '<hr style="border:none;border-top:1px dashed #D6D4D2;margin:22px 0 16px 0;">',
+                    unsafe_allow_html=True,
+                )
+            # Turn label
+            label_color = "#6442BD" if is_newest else "#8B858E"
+            label_text = f"Turn {turn_number}" + ("  ·  newest" if is_newest else "")
+            st.markdown(
+                f'<div style="color:{label_color};font-size:0.62rem;font-weight:700;'
+                f'letter-spacing:1.4px;text-transform:uppercase;margin:4px 0 6px 0;">'
+                f'{label_text}</div>',
+                unsafe_allow_html=True,
+            )
 
-question = st.session_state.pop("pending_question", None) or (
-    user_input.strip() if send and user_input.strip() else None
-)
+            # Render messages within the turn (user first, then assistant)
+            for m in turn:
+                if m["role"] == "user":
+                    content = m["content"] if isinstance(m["content"], str) else str(m["content"])
+                    st.markdown(f'<div class="msg-user">{content}</div>', unsafe_allow_html=True)
+                elif m["role"] == "assistant":
+                    if isinstance(m["content"], list):
+                        for block in m["content"]:
+                            if isinstance(block, dict):
+                                if block.get("type") == "text" and block.get("text"):
+                                    st.markdown(
+                                        f'<div class="msg-agent">{render_md(block["text"])}</div>',
+                                        unsafe_allow_html=True,
+                                    )
+                                elif block.get("type") == "tool_use":
+                                    render_tool_pill(block["name"], block.get("input", {}))
+                    elif isinstance(m["content"], str):
+                        st.markdown(
+                            f'<div class="msg-agent">{render_md(m["content"])}</div>',
+                            unsafe_allow_html=True,
+                        )
 
-if question:
-    st.session_state.messages.append({"role": "user", "content": question})
+            # If this is the newest turn AND there's no assistant response yet,
+            # create the streaming placeholder right here.
+            if is_newest and not has_assistant and question:
+                stream_ctx = {"placeholder": st.empty()}
 
-    # Flatten history for agent
+# ── Streaming dispatch (only when we have a pending question + placeholder) ──
+
+if question and stream_ctx is not None:
+    # Build agent history (excluding the just-appended user message handled separately)
     agent_msgs = []
     for m in st.session_state.messages:
         if m["role"] == "user":
-            agent_msgs.append({"role": "user", "content": m["content"] if isinstance(m["content"], str) else str(m["content"])})
+            agent_msgs.append({
+                "role": "user",
+                "content": m["content"] if isinstance(m["content"], str) else str(m["content"]),
+            })
         elif m["role"] == "assistant":
             txt = ""
             if isinstance(m["content"], list):
-                txt = " ".join(b.get("text", "") for b in m["content"] if isinstance(b, dict) and b.get("type") == "text")
+                txt = " ".join(b.get("text", "") for b in m["content"]
+                               if isinstance(b, dict) and b.get("type") == "text")
             elif isinstance(m["content"], str):
                 txt = m["content"]
             if txt:
                 agent_msgs.append({"role": "assistant", "content": txt})
 
-    with left:
-        placeholder = st.empty()
-        accumulated = ""
-        tool_results_turn = []
-        tool_calls_turn   = []
+    placeholder = stream_ctx["placeholder"]
+    accumulated = ""
+    tool_results_turn: list[str] = []
+    tool_calls_turn:   list[dict] = []
 
-        placeholder.markdown('<div class="msg-agent">⚡ Analysing...</div>', unsafe_allow_html=True)
+    placeholder.markdown(
+        '<div class="msg-agent" style="color:#786D79;">⚡ Analysing…</div>',
+        unsafe_allow_html=True,
+    )
 
-        for event in stream_response(agent_msgs):
-            if event["type"] == "text":
-                accumulated += event["text"]
-                placeholder.markdown(
-                    f'<div class="msg-agent">{render_md(accumulated)}<span style="color:#6442BD">▌</span></div>',
-                    unsafe_allow_html=True,
-                )
-            elif event["type"] == "tool_use":
-                tool_calls_turn.append(event)
-            elif event["type"] == "tool_result":
-                tool_results_turn.append(event["result"])
-            elif event["type"] == "done":
-                placeholder.markdown(
-                    f'<div class="msg-agent">{render_md(accumulated)}</div>',
-                    unsafe_allow_html=True,
-                )
+    for event in stream_response(agent_msgs):
+        if event["type"] == "text":
+            accumulated += event["text"]
+            placeholder.markdown(
+                f'<div class="msg-agent">{render_md(accumulated)}'
+                f'<span style="color:#6442BD">▌</span></div>',
+                unsafe_allow_html=True,
+            )
+        elif event["type"] == "tool_use":
+            tool_calls_turn.append(event)
+        elif event["type"] == "tool_result":
+            tool_results_turn.append(event["result"])
+        elif event["type"] == "done":
+            placeholder.markdown(
+                f'<div class="msg-agent">{render_md(accumulated)}</div>',
+                unsafe_allow_html=True,
+            )
 
     # Save assistant response
     blocks = [{"type": "tool_use", "name": tc["name"], "input": tc["input"]} for tc in tool_calls_turn]
@@ -626,4 +702,4 @@ if question:
     st.session_state.verdict = extract_verdict(accumulated, tool_results_turn)
     st.rerun()
 
-# build-stamp: 2026-05-13 16:26 UTC
+# build-stamp: 2026-05-13 16:31 UTC
