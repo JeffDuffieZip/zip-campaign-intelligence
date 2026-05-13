@@ -793,8 +793,15 @@ def stream_demo_response(messages: list[dict]) -> Generator[dict, None, None]:
         return
 
     text = last_user["content"]
+    text_lower = text.lower()
 
-    # 1. Scripted scenarios (highest priority)
+    # 1. Comparison takes priority over scenario detection
+    #    (otherwise "Compare July 4th and Memorial Day" triggers the POST scenario)
+    if any(k in text_lower for k in ["compare", " vs ", " versus ", "head to head",
+                                       "which performed", "which is better", "which won"]):
+        yield from _handle_comparison(text); return
+
+    # 2. Scripted scenarios (only when not a comparison)
     scenario = _detect_scenario(text)
     if scenario == "post":
         yield from _scenario_post_campaign(); return
@@ -803,8 +810,7 @@ def stream_demo_response(messages: list[dict]) -> Generator[dict, None, None]:
     if scenario == "pre":
         yield from _scenario_pre_campaign(); return
 
-    # 2. Ad-hoc handlers
-    text_lower = text.lower()
+    # 3. Ad-hoc handlers
 
     # List / directory of campaigns
     if any(k in text_lower for k in [
@@ -828,11 +834,6 @@ def stream_demo_response(messages: list[dict]) -> Generator[dict, None, None]:
             if s.lower().replace("_", " ") in text_lower:
                 seg = s; break
         yield from _handle_segment_baselines(seg); return
-
-    # Comparison — let the handler do its own (fuzzy) matching
-    if any(k in text_lower for k in ["compare", " vs ", " versus ", "head to head",
-                                       "which performed", "which is better", "which won"]):
-        yield from _handle_comparison(text); return
 
     # Free-form stat sig (numbers provided)
     stats_inputs = _extract_stats_inputs(text)
