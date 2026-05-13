@@ -3,10 +3,12 @@ Zip Campaign Intelligence Agent — Executive Demo UI
 Run: streamlit run app.py
 """
 
+import base64
 import json
 import os
 import subprocess
 from datetime import datetime
+from pathlib import Path
 
 import markdown as md_lib
 import streamlit as st
@@ -15,6 +17,8 @@ from dotenv import load_dotenv
 from agent import stream_response
 
 load_dotenv()
+
+ASSETS = Path(__file__).parent / "assets"
 
 
 def render_md(text: str) -> str:
@@ -27,11 +31,29 @@ def render_md(text: str) -> str:
         output_format="html5",
     )
 
+
+def load_asset_b64(filename: str) -> str:
+    """Read an asset file and return base64 — for embedding in HTML."""
+    path = ASSETS / filename
+    return base64.b64encode(path.read_bytes()).decode("ascii") if path.exists() else ""
+
+
+def load_asset_text(filename: str) -> str:
+    """Read a text asset (SVG, etc.) and return raw contents."""
+    path = ASSETS / filename
+    return path.read_text() if path.exists() else ""
+
+
+# ── Official Zip Co brand assets (pulled directly from zip.co) ──────────────
+ZIP_WORDMARK_SVG = load_asset_text("zip_wordmark.svg")
+ZIP_SQUARE_LOGO_B64 = load_asset_b64("zip_logo.png")
+
 # ── Page config ───────────────────────────────────────────────────────────────
 
+_favicon_path = ASSETS / "zip_logo.png"
 st.set_page_config(
     page_title="Zip · Campaign Intelligence",
-    page_icon="⚡",
+    page_icon=str(_favicon_path) if _favicon_path.exists() else "⚡",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
@@ -66,7 +88,17 @@ st.markdown("""
     display: flex; align-items: center; justify-content: space-between;
     box-shadow: 0 1px 2px rgba(26,7,37,0.04);
   }
-  .zip-logo-wrap { display:flex; align-items:center; gap:14px; }
+  .zip-logo-wrap { display:flex; align-items:center; gap:16px; }
+  .zip-wordmark {
+    display:flex; align-items:center; height:32px;
+  }
+  .zip-wordmark svg {
+    height:32px; width:auto; display:block;
+  }
+  .zip-pipe {
+    width:1px; height:30px; background:#E1E0DF;
+  }
+  /* Legacy fallback for any remaining placeholder marks */
   .zip-mark {
     width:38px; height:38px; border-radius:10px;
     background: #1A0725;
@@ -980,24 +1012,9 @@ except Exception:
 st.markdown(f"""
 <div class="zip-header">
   <div class="zip-logo-wrap">
-    <!-- Zip Co logo SVG -->
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 44" width="54" height="30"
-         style="flex-shrink:0;border-radius:6px;">
-      <rect width="80" height="44" rx="7" fill="#12001E"/>
-      <!-- z -->
-      <line x1="7" y1="12" x2="24" y2="12" stroke="white" stroke-width="3.8" stroke-linecap="round"/>
-      <line x1="24" y1="12" x2="7" y2="32" stroke="white" stroke-width="3.8" stroke-linecap="round"/>
-      <line x1="7" y1="32" x2="24" y2="32" stroke="white" stroke-width="3.8" stroke-linecap="round"/>
-      <!-- i dot = purple square -->
-      <rect x="32" y="10" width="9" height="9" rx="1.5" fill="#7B55D6"/>
-      <!-- i stem -->
-      <line x1="36.5" y1="21" x2="36.5" y2="32" stroke="white" stroke-width="3.8" stroke-linecap="round"/>
-      <!-- p stem -->
-      <line x1="47" y1="21" x2="47" y2="40" stroke="white" stroke-width="3.8" stroke-linecap="round"/>
-      <!-- p bowl -->
-      <path d="M47 21 Q48 17 56 17 Q67 17 67 27 Q67 36 56 36 Q48 36 47 33"
-            stroke="white" stroke-width="3.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-    </svg>
+    <!-- Official Zip Co wordmark — pulled directly from zip.co -->
+    <div class="zip-wordmark">{ZIP_WORDMARK_SVG}</div>
+    <div class="zip-pipe"></div>
     <div>
       <div class="zip-eyebrow">Growth Analytics</div>
       <div class="zip-logo">Campaign Intelligence<span class="dot">.</span></div>
@@ -1084,9 +1101,16 @@ with tab_chat:
 
       # ── Render messages, NEWEST TURN FIRST ─────────────────────────────────
       if not st.session_state.messages:
-          st.markdown("""
+          _logo = (
+              f'<img src="data:image/png;base64,{ZIP_SQUARE_LOGO_B64}" alt="Zip" '
+              f'style="width:54px;height:54px;border-radius:14px;'
+              f'box-shadow:0 2px 6px rgba(26,7,37,0.12);margin-bottom:14px;"/>'
+              if ZIP_SQUARE_LOGO_B64
+              else '<div class="empty-state-mark">Z</div>'
+          )
+          st.markdown(f"""
           <div class="empty-state" style="margin-top:18px;">
-            <div class="empty-state-mark">Z</div>
+            {_logo}
             <div class="eyebrow" style="margin-bottom:6px;">Ready</div>
             <div style="font-size:1.1rem;color:#1A0725;font-weight:700;">
               Ask about any Braze campaign
