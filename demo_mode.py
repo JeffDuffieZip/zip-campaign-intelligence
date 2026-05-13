@@ -81,6 +81,50 @@ def _two_proportion_z(p_t: float, p_c: float, n_t: int, n_c: int) -> dict:
 # ── Pre-scripted scenario responses ────────────────────────────────────────────
 
 
+def _ab_results_table(
+    n_t: int, cvr_t: float, n_c: int, cvr_c: float,
+    t_stat: float, conf: str, is_sig: bool,
+    i_customers: int = None, i_ttv: float = None,
+    cann: float = None, days_running: int = None,
+    stage: str = "post",
+) -> str:
+    """Return a markdown table block showing A/B test results for any stage."""
+    conv_t = int(cvr_t * n_t)
+    conv_c = int(cvr_c * n_c)
+    lift_pp = (cvr_t - cvr_c) * 100
+    lift_pct = ((cvr_t - cvr_c) / cvr_c) * 100 if cvr_c else 0
+    sig_icon = "🟢 TRUE" if is_sig else "🔴 FALSE"
+
+    days_str = f" · **{days_running} days in**" if days_running else ""
+    header = f"#### {'Final' if stage == 'post' else 'Current State'} A/B Results{days_str}\n\n"
+
+    arm_table = (
+        f"| | Population | Converters | CVR |\n"
+        f"|---|---|---|---|\n"
+        f"| **Target** | {n_t:,} | {conv_t:,} | **{cvr_t*100:.2f}%** |\n"
+        f"| **Control** | {n_c:,} | {conv_c:,} | {cvr_c*100:.2f}% |\n"
+        f"| **Lift** | — | **+{conv_t - conv_c:,}** | "
+        f"**{lift_pp:+.2f} pp** ({lift_pct:+.1f}% rel) |\n\n"
+    )
+
+    # Summary row
+    summary_cols = "| Stat Sig | T-Statistic | Confidence |"
+    summary_vals = f"| {sig_icon} | **{t_stat:.3f}** | **{conf}** |"
+    summary_sep  = "|---|---|---|"
+
+    if i_customers is not None:
+        summary_cols += " iCustomers | Incremental TTV |"
+        summary_vals += f" **{i_customers:+,}** | **${i_ttv:+,.0f}** |" if i_ttv else f" **{i_customers:+,}** | — |"
+        summary_sep  += "---|---|"
+    if cann is not None:
+        summary_cols += " Cannibalization |"
+        summary_vals += f" {cann*100:.1f}% |"
+        summary_sep  += "---|"
+
+    summary_table = f"{summary_cols}\n{summary_sep}\n{summary_vals}\n\n"
+    return header + arm_table + summary_table
+
+
 def _scenario_post_campaign() -> Generator[dict, None, None]:
     """The App Deals July 4th campaign — final read."""
     c = get_campaign_details("July 4th")
@@ -104,15 +148,27 @@ def _scenario_post_campaign() -> Generator[dict, None, None]:
         "current_n_treatment": c["TARGET_AUDIENCE"],
     }, enriched)
 
+    results_table = _ab_results_table(
+        n_t=c["TARGET_AUDIENCE"], cvr_t=c["CVR_TARGET"],
+        n_c=c["CONTROL_AUDIENCE"], cvr_c=c["CVR_CONTROL"],
+        t_stat=stat["t_statistic"], conf=stat["confidence_label"],
+        is_sig=stat["is_significant"],
+        i_customers=c.get("iCustomers"), i_ttv=c.get("iTTV"),
+        cann=c.get("CANNIBALIZATION_RATE"), stage="post",
+    )
+
     narrative = (
         f"**App Deals — July 4th: Statistically Significant. SCALE.**\n\n"
         f"This is a clean, defensible win.\n\n"
-        f"**The Headline Numbers**\n"
-        f"- Target arm: {c['TARGET_AUDIENCE']:,} customers at **{c['CVR_TARGET']*100:.2f}% CVR**\n"
-        f"- Control arm: {c['CONTROL_AUDIENCE']:,} customers at **{c['CVR_CONTROL']*100:.2f}% CVR**\n"
-        f"- Absolute lift: **+{(c['CVR_TARGET']-c['CVR_CONTROL'])*100:.2f} pp** "
-        f"(+{((c['CVR_TARGET']-c['CVR_CONTROL'])/c['CVR_CONTROL'])*100:.1f}% relative)\n"
-        f"- T-statistic: **{stat['t_statistic']:.3f}** — clears the 99% confidence threshold of 2.576\n\n"
+        f"{results_table}"
+        f"**What's Actually Incremental**\n"
+        f"Raw conversions in the target arm: **{int(c['CVR_TARGET']*c['TARGET_AUDIENCE']):,}**. "
+        f"But only **{c['iCustomers']:,} of those were truly incremental** — the rest would have "
+        f"purchased anyway. This is the gap most campaign reports miss.\n\n"
+        f"- Incremental customers: **+{c['iCustomers']:,}**\n"
+        f"- Incremental TTV: **+${c['iTTV']:,.0f}**\n"
+        f"- Cannibalization rate: **{c['CANNIBALIZATION_RATE']*100:.1f}%** "
+        f"— high, but expected for a holiday push to an already-engaged App Deals segment\n\n"
         f"**What's Actually Incremental**\n"
         f"Raw conversions in the target arm: **{int(c['CVR_TARGET']*c['TARGET_AUDIENCE']):,}**. "
         f"But only **{c['iCustomers']:,} of those were truly incremental** — the rest would have "
@@ -166,15 +222,19 @@ def _scenario_during_campaign() -> Generator[dict, None, None]:
         "days_running": 14,
     }, enriched)
 
+    results_table = _ab_results_table(
+        n_t=c["TARGET_AUDIENCE"], cvr_t=c["CVR_TARGET"],
+        n_c=c["CONTROL_AUDIENCE"], cvr_c=c["CVR_CONTROL"],
+        t_stat=stat["t_statistic"], conf=stat["confidence_label"],
+        is_sig=stat["is_significant"],
+        days_running=14, stage="during",
+    )
+
     narrative = (
         f"**App Deals — Jan 2025 Email: Not Significant. STOP.**\n\n"
         f"This campaign is not going to get there. Here's the math.\n\n"
-        f"**Current State (14 days in)**\n"
-        f"- Target: {c['TARGET_AUDIENCE']:,} customers at **{c['CVR_TARGET']*100:.2f}% CVR**\n"
-        f"- Control: {c['CONTROL_AUDIENCE']:,} customers at **{c['CVR_CONTROL']*100:.2f}% CVR**\n"
-        f"- Absolute lift: **+{(c['CVR_TARGET']-c['CVR_CONTROL'])*100:.2f} pp** "
-        f"— barely above noise\n"
-        f"- T-statistic: **{stat['t_statistic']:.3f}** — needs 1.96 for 95% confidence. "
+        f"{results_table}"
+        f"T-statistic of **{stat['t_statistic']:.3f}** — needs **1.96** for 95% confidence. "
         f"We're nowhere close.\n\n"
         f"**What Would It Take?**\n"
         f"At the current effect size, we'd need an **additional 4.2M users** in the test — "
@@ -245,18 +305,27 @@ def _scenario_pre_campaign() -> Generator[dict, None, None]:
                          {"expected_lift_pct": lift_pct, "eligible_pop": pop, "segment": "Best_Buy_New"},
                          sizing)
 
+    sizing_table = (
+        f"#### Pre-Launch Sizing — Best Buy New Purchasers\n\n"
+        f"| | CVR | N / Arm | Total N | Pool Coverage | Days to Sig |\n"
+        f"|---|---|---|---|---|---|\n"
+        f"| **Baseline (control)** | {baseline*100:.2f}% | — | — | — | — |\n"
+        f"| **Target (+15% lift)** | **{p_t*100:.2f}%** | **{n_req:,}** | "
+        f"**{n_req*2:,}** | {sizing['population_coverage_pct']}% of 200K | **~22 days** |\n\n"
+        f"| Expected iCustomers | Expected iTTV | Eligible Pool | Recommendation |\n"
+        f"|---|---|---|---|\n"
+        f"| **+{sizing['expected_i_customers']:,}** | "
+        f"**+${sizing['expected_i_ttv']:,}** | 200,000 | 🟢 GREENLIGHT |\n\n"
+    )
+
     narrative = (
         f"**Best Buy — New Purchasers V3: Pre-Launch Sizing**\n\n"
         f"Here's what you need to know before greenlighting this test.\n\n"
+        f"{sizing_table}"
         f"**Segment Baseline**\n"
         f"Across 6 prior Best Buy New Purchaser campaigns, our historical baseline CVR is "
         f"**{baseline*100:.2f}%**. This is a hard-to-convert segment — customers who've never "
         f"transacted with Zip — so don't anchor on App Deals' 9% CVR.\n\n"
-        f"**Sizing for a 15% Relative Lift**\n"
-        f"- Target lift: 15% relative → expected CVR of **{p_t*100:.2f}%**\n"
-        f"- Required sample size: **{n_req:,} customers per arm** "
-        f"({n_req*2:,} total — {sizing['population_coverage_pct']}% of your 200K eligible pool)\n"
-        f"- Estimated time to significance: **~22 days** at standard daily entry rates\n\n"
         f"**Projected Outcome (if hypothesis holds)**\n"
         f"- Expected incremental customers: **+{sizing['expected_i_customers']:,}**\n"
         f"- Expected incremental TTV: **+${sizing['expected_i_ttv']:,}** "
