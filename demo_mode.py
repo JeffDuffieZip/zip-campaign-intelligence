@@ -268,7 +268,7 @@ def _scenario_pre_campaign() -> Generator[dict, None, None]:
         f"the test is dead — stop early.\n"
         f"3. **Confounders**: Run during a non-promotional window. Avoid overlap with the "
         f"BFCM cycle which has its own audience pull.\n\n"
-        f"**Recommendation: GREENLIGHT**\n"
+        f"🟢 **Recommendation: GREENLIGHT**\n"
         f"The test is well-powered, the projected return justifies the spend, and we have "
         f"a clean read window. Launch when ready."
     )
@@ -448,6 +448,17 @@ def _handle_campaign_lookup(c: dict) -> Generator[dict, None, None]:
     ittv  = c.get("iTTV") or 0
     cann  = c.get("CANNIBALIZATION_RATE") or 0
 
+    # Derive confidence label from t-stat
+    abs_t = abs(t_stat_safe)
+    if abs_t >= 2.576:
+        conf_label = "99% CI"
+    elif abs_t >= 1.96:
+        conf_label = "95% CI"
+    elif abs_t >= 1.645:
+        conf_label = "90% CI"
+    else:
+        conf_label = f"~{int(min(99, max(50, abs_t * 40)))}% CI"
+
     has_results = is_sig is not None and (n_t > 0 and n_c > 0)
     if has_results:
         sig_word = "Statistically significant" if is_sig else "Not significant"
@@ -469,12 +480,13 @@ def _handle_campaign_lookup(c: dict) -> Generator[dict, None, None]:
     cid = c.get("CAMPAIGN_CANVAS_ID", "")
 
     # Build sections conditionally — only show results if we have them
+    t_stat_display = f"t = {t_stat_safe:.3f} ({conf_label}) · " if has_results else ""
     header = f"""### {name}
 
 <div class="verdict-line">
   <span class="pill {sig_pill}">● {sig_word}</span>
   <span class="pill {rec_pill}">{rec}</span>
-  <span style="color:#786D79;font-size:0.78rem">{f"t = {t_stat_safe:.3f} · " if has_results else ""}{sig_detail}</span>
+  <span style="color:#786D79;font-size:0.78rem">{t_stat_display}{sig_detail}</span>
 </div>
 
 | Field | Value |
@@ -487,22 +499,22 @@ def _handle_campaign_lookup(c: dict) -> Generator[dict, None, None]:
 """
 
     if has_results:
+        # Compute per-arm TTV estimates (conversions × $163 avg TTV for known segments)
+        ttv_t = c.get("TARGET_TTV") or int(p_t * n_t) * 163
+        ttv_c = c.get("CONTROL_TTV") or int(p_c * n_c) * 163
+        sig_flag = "✅ TRUE" if is_sig else "❌ FALSE"
         perf_section = f"""
-#### Performance
+#### A/B Test Results
 
-| Arm | Audience | CVR | Conversions |
+| | Population | Converters | TTV | CVR |
+|---|---|---|---|---|
+| **Target** | {n_t:,} | {int(p_t*n_t):,} | ${ttv_t:,.0f} | **{p_t*100:.2f}%** |
+| **Control** | {n_c:,} | {int(p_c*n_c):,} | ${ttv_c:,.0f} | {p_c*100:.2f}% |
+| **Lift** | — | +{int((p_t-p_c)*n_t):,} | **+${ittv:,.0f}** | **{lift:+.2f} pp** ({rel:+.1f}% rel) |
+
+| Stat Sig | iCustomers | Incremental TTV | Cannibalization |
 |---|---|---|---|
-| **Target** | {n_t:,} | **{p_t*100:.2f}%** | {int(p_t*n_t):,} |
-| **Control** | {n_c:,} | {p_c*100:.2f}% | {int(p_c*n_c):,} |
-| **Lift** | — | **{lift:+.2f} pp** ({rel:+.1f}% rel) | — |
-
-#### Incrementality
-
-| Metric | Value |
-|---|---|
-| Incremental customers | **{icust:+,}** |
-| Incremental TTV | **${ittv:+,.0f}** |
-| Cannibalization rate | {cann*100:.1f}% |
+| {sig_flag} | **{icust:+,}** | **${ittv:+,.0f}** | {cann*100:.1f}% |
 
 > {sig_word} at the 95% threshold. **Recommendation: {rec}.**
 """
@@ -602,23 +614,30 @@ def _handle_stat_sig(inputs: dict) -> Generator[dict, None, None]:
         "RETHINK": "pill-neg",
     }.get(rec, "pill-info")
 
+    conf_str = stat.get("confidence_label", "")
+    sig_flag = "✅ TRUE" if sig else "❌ FALSE"
+    icust_val = enriched["i_customers"]
     narrative = f"""### Stat sig check
 
 <div class="verdict-line">
   <span class="pill {sig_pill}">● {verdict_text}</span>
   <span class="pill {rec_pill}">{rec}</span>
-  <span style="color:#786D79;font-size:0.78rem">t = {t:.3f}</span>
+  <span style="color:#786D79;font-size:0.78rem">t = {t:.3f} ({conf_str})</span>
 </div>
 
 {oneliner}
 
-#### Inputs
+#### A/B Test Results
 
-| Arm | Audience | CVR |
-|---|---|---|
-| **Target** | {inputs['n_t']:,} | **{inputs['p_t']*100:.2f}%** |
-| **Control** | {inputs['n_c']:,} | {inputs['p_c']*100:.2f}% |
-| **Delta** | — | **{lift:+.2f} pp** |
+| | Population | Converters | CVR |
+|---|---|---|---|
+| **Target** | {inputs['n_t']:,} | {int(inputs['p_t']*inputs['n_t']):,} | **{inputs['p_t']*100:.2f}%** |
+| **Control** | {inputs['n_c']:,} | {int(inputs['p_c']*inputs['n_c']):,} | {inputs['p_c']*100:.2f}% |
+| **Lift** | — | +{int((inputs['p_t']-inputs['p_c'])*inputs['n_t']):,} | **{lift:+.2f} pp** |
+
+| Stat Sig | iCustomers | T-Statistic | Confidence |
+|---|---|---|---|
+| {sig_flag} | **{icust_val:+,}** | **{t:.3f}** | **{conf_str}** |
 
 #### Test math
 
@@ -881,19 +900,18 @@ def _handle_roi_matrix(
             f"**{fixed_roi:.1f}%** |\n"
         )
 
-    # ── Per-tier detail cards ──────────────────────────────────────────────────
-    tier_cards = ""
+    # ── Per-tier detail table ──────────────────────────────────────────────────
+    tier_detail_rows = ""
     for t in tiers:
-        star = "⭐ **Best scenario**" if t is best else ""
-        tier_cards += f"""
-**{t['label']}** {star}
-- Segment: `{t['segment']}` · Eligible population: {t['pop']:,}
-- Baseline CVR: **{t['cvr']*100:.1f}%** → Target CVR: **{t['p2']*100:.2f}%** (+{t['lift_pct']}% lift)
-- Required per arm: **{t['n_arm']:,}** · Est. days to significance: **{t['days']} days**
-- Treatment conversions: {t['conv_treat']:,} · Cost: **${t['cost']:,.0f}**
-- Expected TTV: ${t['ttv_treat']:,.0f} · **NTM increase: ${t['ntm']:,.0f}** · ROI: {fixed_roi:.1f}%
-
-"""
+        star = " ⭐" if t is best else ""
+        tier_detail_rows += (
+            f"| **{t['label']}{star}** | `{t['segment']}` | {t['pop']:,} | "
+            f"{t['cvr']*100:.1f}% → {t['p2']*100:.2f}% | "
+            f"{t['n_arm']:,} | {t['days']}d | "
+            f"{t['conv_treat']:,} | ${t['cost']:,.0f} | "
+            f"${t['ttv_treat']:,.0f} | **${t['ntm']:,.0f}** | {fixed_roi:.1f}% |\n"
+        )
+    tier_cards = tier_detail_rows  # kept same var name for use in narrative below
 
     narrative = f"""### ROI Planning Matrix — All CVR Tiers
 
@@ -912,6 +930,8 @@ def _handle_roi_matrix(
 
 #### Tier Detail
 
+| Tier | Segment | Population | CVR (Base → Target) | N/Arm | Days | Conversions | Cost | TTV | NTM | ROI |
+|---|---|---|---|---|---|---|---|---|---|---|
 {tier_cards}
 ---
 

@@ -215,12 +215,13 @@ st.markdown("""
     font-weight:800; letter-spacing:0.8px; display:inline-block;
     margin-left:6px;
   }
-  .rec-SCALE   { background:#E8F3EC; color:#1B7E4F; border:1px solid #1B7E4F; }
-  .rec-EXTEND  { background:#EFE9FA; color:#411260; border:1px solid #6442BD; }
-  .rec-ITERATE { background:#FBF2E5; color:#A55A00; border:1px solid #C97A1C; }
-  .rec-WATCH   { background:#F5F4F2; color:#411260; border:1px solid #786D79; }
-  .rec-RETHINK { background:#FBEAEA; color:#B43A3A; border:1px solid #B43A3A; }
-  .rec-STOP    { background:#FBEAEA; color:#B43A3A; border:1px solid #B43A3A; }
+  .rec-SCALE      { background:#E8F3EC; color:#1B7E4F; border:1px solid #1B7E4F; }
+  .rec-GREENLIGHT { background:#E8F3EC; color:#1B7E4F; border:2px solid #1B7E4F; font-size:0.8rem; }
+  .rec-EXTEND     { background:#EFE9FA; color:#411260; border:1px solid #6442BD; }
+  .rec-ITERATE    { background:#FBF2E5; color:#A55A00; border:1px solid #C97A1C; }
+  .rec-WATCH      { background:#F5F4F2; color:#411260; border:1px solid #786D79; }
+  .rec-RETHINK    { background:#FBEAEA; color:#B43A3A; border:1px solid #B43A3A; }
+  .rec-STOP       { background:#FBEAEA; color:#B43A3A; border:1px solid #B43A3A; }
 
   /* Metric tiles */
   .metric-row { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:14px 0 4px 0; }
@@ -434,7 +435,7 @@ def extract_verdict(text: str, tool_results: list) -> dict:
                 })
         except Exception:
             pass
-    for rec in ["SCALE", "EXTEND", "ITERATE", "WATCH", "RETHINK", "STOP"]:
+    for rec in ["GREENLIGHT", "SCALE", "EXTEND", "ITERATE", "WATCH", "RETHINK", "STOP"]:
         if rec in text.upper():
             v["recommendation"] = rec
             break
