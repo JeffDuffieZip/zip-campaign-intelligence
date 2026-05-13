@@ -29,6 +29,10 @@ SEGMENT_BASELINES = {
     "BAU_Billpay":          {"avg_cvr": 0.20788, "min_cvr": 0.20788, "max_cvr": 0.20788, "n_campaigns": 1},
     "Weekly_Deals":         {"avg_cvr": 0.02172, "min_cvr": 0.02172, "max_cvr": 0.02172, "n_campaigns": 1},
     "Gift_Cards":           {"avg_cvr": 0.02593, "min_cvr": 0.02593, "max_cvr": 0.02593, "n_campaigns": 1},
+    # ── Mid-tier CVR tiers added for pre-campaign sizing demos ──────────────────
+    "Fashion_Nova_Loyalist": {"avg_cvr": 0.06000, "min_cvr": 0.05400, "max_cvr": 0.06800, "n_campaigns": 3},  # ~6% baseline
+    "App_Deals_Seasonal":    {"avg_cvr": 0.08000, "min_cvr": 0.07200, "max_cvr": 0.09100, "n_campaigns": 5},  # ~8% baseline
+    "App_Deals_High_Intent": {"avg_cvr": 0.10000, "min_cvr": 0.09200, "max_cvr": 0.11300, "n_campaigns": 4},  # ~10% baseline
 }
 
 # ── Benchmarks (p25/p50/p75/p90 across stat-sig positive campaigns) ───────────
@@ -211,6 +215,161 @@ CAMPAIGNS = [
         "CONTROL_AUDIENCE":             None,
         "_demo_scenario":               "pre_campaign",
         "_demo_insight":                "Historical baseline CVR for Best Buy / New Purchasers is 1.056% (average across 6 past campaigns). To detect a 15% lift (→ 1.21% CVR) at 80% power and 95% CI, you need ~92,000 users per arm.",
+        "_demo_recommendation":         "SIZE_AND_LAUNCH",
+    },
+
+    # ═══════════════════════════════════════════════════════════════════
+    # DEMO SCENARIO 4 — DURING CAMPAIGN @ 6% CVR (EXTEND)
+    # Campaign: Fashion Nova Loyalist Email — currently running, day 10
+    # For demo: "Are we significant yet? What needs to change?"
+    # Stats: t=1.61 → 90% CI, need ~20 more days to hit 95%
+    # ═══════════════════════════════════════════════════════════════════
+    {
+        "name":                         "2026-04-03/Fashion_Nova/Loyalist/Email/CO_Purchase/Fashion_Nova/3Day",
+        "CAMPAIGN_CANVAS_ID":           "d4a1f820-3c77-4b8e-a921-ff2c9e305d11",
+        "display_name":                 "Fashion Nova Loyalist — Email (Live)",
+        "Campaign Canvas Channel":      "EMAIL",
+        "Campaign Canvas Type":         "A/B Test",
+        "CAMPAIGN_LAUNCH_DATE":         "2026-04-03",
+        "CAMPAIGN_END_DATE":            None,
+        "DAYS_RUNNING":                 10,
+        "STATUS":                       "running",
+        "segment":                      "Fashion_Nova_Loyalist",
+        "geo":                          "Loyalist",
+        "conv_type":                    "CO_Purchase",
+        "partner":                      "Fashion_Nova",
+        "conv_window":                  "3Day",
+        "CONVERSION_WINDOW_DAYS":       3,
+        # Audience (at day 10 snapshot)
+        "TARGET_AUDIENCE":              24_500,
+        "CONTROL_AUDIENCE":             24_500,
+        # CVR — 6% baseline, 5.8% relative lift observed so far
+        "CVR_TARGET":                   0.06350,
+        "CVR_CONTROL":                  0.06000,
+        "CVR_DELTA":                    0.003500,
+        "CVR_POOLED":                   0.06175,
+        "CVR_SE":                       0.002176,
+        "CVR_T_STAT":                   1.608,
+        # Stat sig: approaching 95% but not there yet
+        "stat_sig":                     False,
+        "CONFIDENCE_LEVEL":             "90%",
+        "P_VALUE":                      "~0.11",
+        # Conversions
+        "CONVERSIONS_TARGET":           int(24_500 * 0.06350),
+        "CONVERSIONS_CONTROL":          int(24_500 * 0.06000),
+        # Incrementality (not reported — not yet 95% sig)
+        "iCustomers":                   None,
+        "iTTV":                         None,
+        "CANNIBALIZATION_RATE":         None,
+        "ORGANIC_RATE":                 0.06000,
+        # Delivery
+        "EMAIL_SENDS":                  24_500,
+        "PUSH_SENDS":                   0,
+        "IAM_IMPRESSIONS":              0,
+        # Daily entry rate (for days-to-sig projection)
+        "DAILY_ENTRY_RATE":             int(24_500 / 10),   # 2,450/day
+        # Enriched demo context
+        "_demo_scenario":               "during_campaign_6pct",
+        "_demo_insight":                "6% baseline CVR segment. t-stat of 1.608 = 90% confidence. We're seeing a +5.8% relative lift (+0.35 pp delta) but need |t| > 1.96 for 95% CI. Require ~49,750 more users per arm. At 2,450/day entry rate, that is ~20 more days.",
+        "_demo_recommendation":         "EXTEND",
+        "_demo_what_to_change":         "Options: (1) Run 20 more days at current pace to hit 95% CI, (2) Double the audience by widening the Loyalist definition to include Lapsed_12M customers, (3) Increase incentive offer to drive a larger CVR delta — every +0.5 pp reduces required run-time by ~5 days.",
+    },
+
+    # ═══════════════════════════════════════════════════════════════════
+    # DEMO SCENARIO 5 — POST CAMPAIGN @ 8% CVR (SCALE @ 99% CI)
+    # Campaign: App Deals Back-to-School Multi — completed
+    # For demo: "Was it significant? What were the incremental results?"
+    # Stats: t=2.77 → 99% CI, 409 iCustomers, $66.6K iTTV
+    # ═══════════════════════════════════════════════════════════════════
+    {
+        "name":                         "2025-08-01/App_Deals/Back_to_School/Multi/App_Purchase/NA/3Day",
+        "CAMPAIGN_CANVAS_ID":           "b7e2c419-5f01-4d3a-9c8b-1a304f2e8d72",
+        "display_name":                 "App Deals — Back to School",
+        "Campaign Canvas Channel":      "MULTI",
+        "Campaign Canvas Type":         "A/B Test",
+        "CAMPAIGN_LAUNCH_DATE":         "2025-08-01",
+        "CAMPAIGN_END_DATE":            "2025-08-07",
+        "DAYS_RUNNING":                 7,
+        "STATUS":                       "completed",
+        "segment":                      "App_Deals_Seasonal",
+        "geo":                          "Back_to_School",
+        "conv_type":                    "App_Purchase",
+        "partner":                      "NA",
+        "conv_window":                  "3Day",
+        "CONVERSION_WINDOW_DAYS":       3,
+        # Audience
+        "TARGET_AUDIENCE":              95_000,
+        "CONTROL_AUDIENCE":             47_500,
+        # CVR — 8% baseline, +3.5% relative lift
+        "CVR_TARGET":                   0.08280,
+        "CVR_CONTROL":                  0.08000,
+        "CVR_DELTA":                    0.002800,
+        "CVR_POOLED":                   0.08186,
+        "CVR_SE":                       0.001510,
+        "CVR_T_STAT":                   2.774,
+        # Stat sig
+        "stat_sig":                     True,
+        "CONFIDENCE_LEVEL":             "99%",
+        "P_VALUE":                      "< 0.01",
+        # Conversions
+        "CONVERSIONS_TARGET":           int(95_000 * 0.08280),
+        "CONVERSIONS_CONTROL":          int(47_500 * 0.08000),
+        # Incrementality
+        "iCustomers":                   266,    # cvr_delta * n_target = 0.0028 * 95,000
+        "iTTV":                         66_612, # (cvr_delta / cvr_target) * ttv_target
+        "CANNIBALIZATION_RATE":         0.3381, # 33.8% — mixed, majority incremental at this tier
+        "ORGANIC_RATE":                 0.08000,
+        # Delivery (multi-channel)
+        "EMAIL_SENDS":                  95_000,
+        "PUSH_SENDS":                   95_000,
+        "IAM_IMPRESSIONS":              0,
+        # Enriched demo context
+        "_demo_scenario":               "post_campaign_8pct",
+        "_demo_insight":                "8% baseline CVR segment (App Deals Seasonal). Statistically significant at 99% confidence. 266 incremental customers drove $66.6K in incremental TTV. Cannibalization rate of 33.8% means ~2 in 3 conversions were genuinely incremental — strong result for a broad App Deals audience.",
+        "_demo_recommendation":         "SCALE",
+    },
+
+    # ═══════════════════════════════════════════════════════════════════
+    # DEMO SCENARIO 6 — PRE-CAMPAIGN SIZING @ 10% CVR
+    # Segment: App Deals High Intent — planning a new test
+    # For demo: "How large does my test need to be?"
+    # Stats: baseline 10%, 10% lift target → 14,742/arm, ~6 days
+    # ═══════════════════════════════════════════════════════════════════
+    {
+        "name":                         "PLANNED/App_Deals/High_Intent_V1/Multi/App_Purchase/NA/3Day",
+        "CAMPAIGN_CANVAS_ID":           "a9f3d207-1e88-4c5b-b341-8d5c20e17f93",
+        "display_name":                 "App Deals High Intent V1 (PLANNED)",
+        "Campaign Canvas Channel":      "MULTI",
+        "Campaign Canvas Type":         "A/B Test",
+        "CAMPAIGN_LAUNCH_DATE":         None,
+        "CAMPAIGN_END_DATE":            None,
+        "DAYS_RUNNING":                 0,
+        "STATUS":                       "planned",
+        "segment":                      "App_Deals_High_Intent",
+        "geo":                          "High_Intent_V1",
+        "conv_type":                    "App_Purchase",
+        "partner":                      "NA",
+        "conv_window":                  "3Day",
+        "CONVERSION_WINDOW_DAYS":       3,
+        # Audience (proposed)
+        "ELIGIBLE_POPULATION":          150_000,
+        "PROPOSED_TARGET_SPLIT":        0.50,
+        # Baseline (10% historical CVR for high-intent App Deals)
+        "CVR_BASELINE":                 0.10000,
+        "CVR_TARGET_EXPECTED":          0.11000,  # 10% relative lift
+        "EXPECTED_LIFT_PCT":            0.10,
+        # Sizing outputs
+        "REQUIRED_N_PER_ARM":           14_742,
+        "REQUIRED_N_TOTAL":             29_484,
+        "ESTIMATED_DAYS_TO_SIG":        6,        # at 5,000 entries/day (150K / 30 days)
+        "EXPECTED_I_CUSTOMERS":         147,      # cvr_delta * n_per_arm = 0.01 * 14,742
+        "EXPECTED_I_TTV":               23_971,   # 147 * $163 AOV
+        # Stat sig not yet applicable
+        "stat_sig":                     None,
+        "TARGET_AUDIENCE":              None,
+        "CONTROL_AUDIENCE":             None,
+        "_demo_scenario":               "pre_campaign_10pct",
+        "_demo_insight":                "10% baseline CVR segment (high-intent App Deals customers). To detect a 10% lift (→ 11% CVR) at 80% power and 95% CI, you need ~14,742 users per arm (29,484 total). At 5,000 entries/day this takes just 6 days — fastest path to significance across all segments.",
         "_demo_recommendation":         "SIZE_AND_LAUNCH",
     },
 
@@ -1018,6 +1177,50 @@ CAMPAIGN_VARIANTS = {
             "CVR": 0.20788,
             "Audience": 59_957,
             "Conversions": int(59_957 * 0.20788),
+            "TTV": 0,
+            "T_Stat": None,
+            "Stat_Sig": None,
+        },
+    ],
+
+    # ── 6% CVR Demo — Fashion Nova Loyalist Email (DURING, EXTEND) ────────────
+    "Fashion_Nova/Loyalist": [
+        {
+            "variant": "Treatment",
+            "CVR": 0.06350,
+            "Audience": 24_500,
+            "Conversions": int(24_500 * 0.06350),
+            "TTV": 0,         # not reported — not yet stat sig
+            "T_Stat": 1.608,
+            "Stat_Sig": False,
+        },
+        {
+            "variant": "Control",
+            "CVR": 0.06000,
+            "Audience": 24_500,
+            "Conversions": int(24_500 * 0.06000),
+            "TTV": 0,
+            "T_Stat": None,
+            "Stat_Sig": None,
+        },
+    ],
+
+    # ── 8% CVR Demo — App Deals Back to School (POST, SCALE @ 99%) ───────────
+    "App_Deals/Back_to_School": [
+        {
+            "variant": "Treatment",
+            "CVR": 0.08280,
+            "Audience": 95_000,
+            "Conversions": int(95_000 * 0.08280),
+            "TTV": 66_612,
+            "T_Stat": 2.774,
+            "Stat_Sig": True,
+        },
+        {
+            "variant": "Control",
+            "CVR": 0.08000,
+            "Audience": 47_500,
+            "Conversions": int(47_500 * 0.08000),
             "TTV": 0,
             "T_Stat": None,
             "Stat_Sig": None,
