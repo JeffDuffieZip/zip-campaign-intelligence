@@ -625,3 +625,5 @@ if question:
     st.session_state.messages.append({"role": "assistant", "content": blocks or accumulated})
     st.session_state.verdict = extract_verdict(accumulated, tool_results_turn)
     st.rerun()
+
+# build-stamp: 2026-05-13 16:26 UTC
