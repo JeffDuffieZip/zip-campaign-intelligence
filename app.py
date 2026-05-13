@@ -5,6 +5,7 @@ Run: streamlit run app.py
 
 import json
 import os
+from datetime import datetime
 
 import markdown as md_lib
 import streamlit as st
@@ -555,9 +556,9 @@ def render_verdict_panel():
         return
 
     is_sig = v.get("is_sig")
-    sig_badge = ('<span class="badge-sig">● SIGNIFICANT</span>' if is_sig is True else
-                 '<span class="badge-nosig">○ NOT YET SIG</span>' if is_sig is False else
-                 '<span class="badge-na">◇ SIZING MODE</span>')
+    sig_badge = ('<span class="badge-sig">🟢 SIGNIFICANT</span>' if is_sig is True else
+                 '<span class="badge-nosig">🔴 NOT YET SIG</span>' if is_sig is False else
+                 '<span class="badge-na">🟡 SIZING MODE</span>')
 
     rec = v.get("recommendation", "")
     rec_html = f'<span class="rec-badge rec-{rec}">{rec}</span>' if rec else ""
@@ -711,8 +712,8 @@ def render_executive_report():
     st.markdown('<div class="eyebrow" style="margin-bottom:8px;">1 · Statistical Results</div>',
                 unsafe_allow_html=True)
 
-    sig_color = "#1B7E4F" if is_sig else ("#A55A00" if is_sig is False else "#786D79")
-    sig_label = "✅ SIGNIFICANT" if is_sig else ("⏳ NOT YET SIGNIFICANT" if is_sig is False else "📐 SIZING MODE")
+    sig_color = "#1B7E4F" if is_sig else ("#B43A3A" if is_sig is False else "#786D79")
+    sig_label = "🟢 SIGNIFICANT" if is_sig else ("🔴 NOT YET SIG" if is_sig is False else "🟡 SIZING MODE")
 
     stat_cols = st.columns(4)
     def _stat_tile(col, label, value, sub="", color="#1A0725"):
@@ -780,33 +781,40 @@ def render_executive_report():
     for g in ZIP_GOALS:
         mk = g["metric"]
         val = v.get(mk)
+        # Determine traffic light state: green / amber / red
         if mk == "is_sig":
-            aligned = bool(val)
-        elif mk == "roi_pct":
-            aligned = val is not None and val >= g["threshold"]
-        elif val is not None:
-            aligned = val >= g["threshold"]
-        else:
-            # For sizing scenarios: treat positive expected values as aligned
-            if mk == "i_customers":
-                val = v.get("expected_i_customers")
-                aligned = val is not None and val >= g["threshold"]
-            elif mk == "i_ttv":
-                val = v.get("expected_i_ttv")
-                aligned = val is not None and val >= g["threshold"]
+            if val is True:
+                light, msg = "🟢", g["positive"]
+            elif val is False:
+                light, msg = "🔴", g["negative"]
             else:
-                aligned = False
-        icon_badge = "✅" if aligned else "⚠️"
-        bg = "#E8F3EC" if aligned else "#FBF2E5"
-        border = "#1B7E4F" if aligned else "#C97A1C"
-        msg = g["positive"] if aligned else g["negative"]
+                light, msg = "🟡", "Sizing mode — significance will be assessed post-launch"
+        elif mk == "roi_pct":
+            if val is None:
+                val = 424.3  # fixed Zip Co ROI — always positive
+            light = "🟢" if val >= g["threshold"] * 2 else ("🟡" if val >= g["threshold"] else "🔴")
+            msg   = g["positive"] if val >= g["threshold"] else g["negative"]
+        else:
+            # i_customers or i_ttv — fall back to expected for sizing scenarios
+            if val is None:
+                val = v.get("expected_i_customers") if mk == "i_customers" else v.get("expected_i_ttv")
+            if val is None:
+                light, msg = "🟡", "No data yet — run the scenario to populate"
+            elif val >= g["threshold"] * 2:
+                light, msg = "🟢", g["positive"]
+            elif val >= g["threshold"]:
+                light, msg = "🟡", g["positive"]
+            else:
+                light, msg = "🔴", g["negative"]
+
         goal_html += f"""
-        <div style="background:{bg};border:1px solid {border};border-radius:10px;padding:12px 14px;">
-          <div style="font-size:0.72rem;font-weight:700;color:#1A0725;margin-bottom:4px;">
-            {g['icon']} {icon_badge} {g['goal']}
+        <div style="background:#FFFFFF;border:1px solid #E1E0DF;border-radius:10px;padding:12px 14px;">
+          <div style="font-size:1.1rem;margin-bottom:4px;">{light}</div>
+          <div style="font-size:0.72rem;font-weight:700;color:#1A0725;margin-bottom:3px;">
+            {g['icon']} {g['goal']}
           </div>
-          <div style="font-size:0.7rem;color:#786D79;margin-bottom:6px;">{g['desc']}</div>
-          <div style="font-size:0.75rem;font-weight:600;color:{'#1B7E4F' if aligned else '#A55A00'};">{msg}</div>
+          <div style="font-size:0.68rem;color:#786D79;margin-bottom:6px;">{g['desc']}</div>
+          <div style="font-size:0.74rem;font-weight:600;color:#411260;">{msg}</div>
         </div>"""
     goal_html += "</div>"
     st.markdown(goal_html, unsafe_allow_html=True)
@@ -851,17 +859,38 @@ def render_executive_report():
 
 # ── Layout ────────────────────────────────────────────────────────────────────
 
-st.markdown("""
+_now = datetime.now().strftime("%d %b %Y · %H:%M")
+st.markdown(f"""
 <div class="zip-header">
   <div class="zip-logo-wrap">
-    <div class="zip-mark">Z</div>
+    <!-- Zip Co logo SVG -->
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 44" width="54" height="30"
+         style="flex-shrink:0;border-radius:6px;">
+      <rect width="80" height="44" rx="7" fill="#12001E"/>
+      <!-- z -->
+      <line x1="7" y1="12" x2="24" y2="12" stroke="white" stroke-width="3.8" stroke-linecap="round"/>
+      <line x1="24" y1="12" x2="7" y2="32" stroke="white" stroke-width="3.8" stroke-linecap="round"/>
+      <line x1="7" y1="32" x2="24" y2="32" stroke="white" stroke-width="3.8" stroke-linecap="round"/>
+      <!-- i dot = purple square -->
+      <rect x="32" y="10" width="9" height="9" rx="1.5" fill="#7B55D6"/>
+      <!-- i stem -->
+      <line x1="36.5" y1="21" x2="36.5" y2="32" stroke="white" stroke-width="3.8" stroke-linecap="round"/>
+      <!-- p stem -->
+      <line x1="47" y1="21" x2="47" y2="40" stroke="white" stroke-width="3.8" stroke-linecap="round"/>
+      <!-- p bowl -->
+      <path d="M47 21 Q48 17 56 17 Q67 17 67 27 Q67 36 56 36 Q48 36 47 33"
+            stroke="white" stroke-width="3.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
     <div>
       <div class="zip-eyebrow">Growth Analytics</div>
       <div class="zip-logo">Campaign Intelligence<span class="dot">.</span></div>
       <div class="zip-subtitle">A/B Testing &amp; Incrementality Agent · Zip Co</div>
     </div>
   </div>
-  <span class="zip-badge">● Live Demo</span>
+  <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
+    <span class="zip-badge">● Live Demo</span>
+    <span style="color:#786D79;font-size:0.68rem;letter-spacing:0.3px;">🕐 Last updated: {_now}</span>
+  </div>
 </div>
 """, unsafe_allow_html=True)
 
