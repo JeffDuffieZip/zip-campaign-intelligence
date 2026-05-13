@@ -270,34 +270,66 @@ UUID_RE = re.compile(
     re.IGNORECASE,
 )
 
+STOP_WORDS = {
+    "the", "a", "an", "is", "are", "and", "or", "for", "to", "of", "in", "on",
+    "campaign", "email", "push", "show", "me", "what", "how", "do", "did", "was",
+    "tell", "give", "find", "look", "lookup", "details", "results", "performance",
+    "about", "on", "with", "this", "that", "all", "any", "from", "by", "as",
+    "iam", "im", "rich", "test", "v1", "v2", "v3", "via",
+}
 
-def _find_campaign(text: str) -> dict | None:
-    """Best-effort campaign lookup. Checks UUID first, then name fragments."""
+# Distinctive brand / segment terms that should match on their own
+DISTINCTIVE_TERMS = {
+    "wayfair", "expedia", "temu", "homegoods", "tj", "maxx", "bestbuy", "best",
+    "buy", "billpay", "esp", "graduation", "labor", "memorial", "father",
+    "father's", "july", "4th", "jan", "feb", "mar", "apr", "may", "jun", "jul",
+    "bfcm", "holiday", "super", "bowl", "jersey", "winning", "deals",
+    "activation", "billpay", "payday", "session", "nudge", "acquisition",
+    "graduation",
+}
+
+
+def _campaign_match_score(c: dict, query_words: set) -> int:
+    """Score a campaign against query words. Higher = better."""
+    name = (c.get("display_name") or c.get("name") or "").lower()
+    name_words = set(re.findall(r"[a-z0-9']+", name)) - STOP_WORDS
+    query_words = query_words - STOP_WORDS
+
+    score = 0
+    for w in query_words:
+        if w in name_words:
+            # Distinctive brand/segment terms count double
+            score += 2 if w in DISTINCTIVE_TERMS else 1
+            # Longer matches are more meaningful
+            if len(w) >= 6:
+                score += 1
+    return score
+
+
+def _find_campaigns(text: str, limit: int = 5) -> list[dict]:
+    """Return ordered list of matching campaigns. UUID match returns single hit."""
     t = text.lower()
 
-    # 1. UUID match (CAMPAIGN_CANVAS_ID)
+    # 1. UUID match — exact hit
     uuid_match = UUID_RE.search(t)
     if uuid_match:
         target_id = uuid_match.group(0)
-        for c in CAMPAIGNS:
-            if c.get("CAMPAIGN_CANVAS_ID", "").lower() == target_id:
-                return c
+        hit = next((c for c in CAMPAIGNS
+                    if c.get("CAMPAIGN_CANVAS_ID", "").lower() == target_id), None)
+        return [hit] if hit else []
 
-    # 2. Look for known campaign keywords by word-overlap
-    candidates = []
-    for c in CAMPAIGNS:
-        name = c.get("display_name", c.get("name", "")).lower()
-        name_words = set(re.findall(r"[a-z]+", name))
-        text_words = set(re.findall(r"[a-z]+", t))
-        stop = {"the", "a", "an", "is", "are", "and", "or", "for", "to", "of", "in", "on",
-                "campaign", "email", "push", "show", "me", "what", "how", "do", "did", "was"}
-        overlap = (name_words & text_words) - stop
-        if len(overlap) >= 2:
-            candidates.append((len(overlap), c))
-    if candidates:
-        candidates.sort(key=lambda x: -x[0])
-        return candidates[0][1]
-    return None
+    # 2. Word-overlap scoring
+    query_words = set(re.findall(r"[a-z0-9']+", t))
+    scored = [(_campaign_match_score(c, query_words), c) for c in CAMPAIGNS]
+    scored = [(s, c) for s, c in scored if s > 0]
+    scored.sort(key=lambda x: (-x[0], len(x[1].get("display_name", ""))))
+    return [c for _, c in scored[:limit]]
+
+
+def _find_campaign(text: str) -> dict | None:
+    """Backward-compat single-result lookup."""
+    matches = _find_campaigns(text, limit=1)
+    return matches[0] if matches else None
 
 
 def _extract_stats_inputs(text: str) -> dict | None:
@@ -751,10 +783,44 @@ def stream_demo_response(messages: list[dict]) -> Generator[dict, None, None]:
     if stats_inputs:
         yield from _handle_stat_sig(stats_inputs); return
 
-    # Campaign lookup
-    campaign = _find_campaign(text)
-    if campaign:
-        yield from _handle_campaign_lookup(campaign); return
+    # Campaign lookup — single match or disambiguation menu
+    matches = _find_campaigns(text, limit=8)
+    if len(matches) == 1:
+        yield from _handle_campaign_lookup(matches[0]); return
+    if len(matches) > 1:
+        # If top match scores significantly higher than #2, go with it
+        top_score   = _campaign_match_score(matches[0], set(re.findall(r"[a-z0-9']+", text.lower())))
+        runner_score = _campaign_match_score(matches[1], set(re.findall(r"[a-z0-9']+", text.lower())))
+        if top_score >= runner_score + 3:
+            yield from _handle_campaign_lookup(matches[0]); return
+        yield from _handle_disambiguation(text, matches); return
 
     # Fallback
     yield from _handle_generic(text)
+
+
+def _handle_disambiguation(query: str, matches: list[dict]) -> Generator[dict, None, None]:
+    """Multiple campaigns matched — show them as a picker table."""
+    yield from _tool_call("list_campaigns", {"search_query": query}, {"matches": len(matches)})
+
+    rows = []
+    for c in matches:
+        dn  = c.get("display_name", c.get("name", ""))
+        ch  = c.get("Campaign Canvas Channel", "EMAIL")
+        ttv = c.get("iTTV") or 0
+        sig = "✅" if c.get("stat_sig") else ("⏳" if c.get("STATUS") == "planned" else "—")
+        cid = c.get("CAMPAIGN_CANVAS_ID", "")
+        cid_short = f"`{cid[:8]}…`" if cid else ""
+        rows.append(f"| {sig} | **{dn}** | {ch} | ${ttv:+,.0f} | {cid_short} |")
+    table = "\n".join(rows)
+
+    narrative = f"""### Found {len(matches)} matching campaigns
+
+| Sig | Campaign | Channel | iTTV | Canvas ID |
+|---|---|---|---|---|
+{table}
+
+**Which one?** Type a more specific name — e.g. *"show me {matches[0].get('display_name')}"* — or paste the full Canvas ID.
+"""
+    yield from _stream_text(narrative)
+    yield {"type": "done"}
