@@ -339,6 +339,18 @@ SCENARIOS = [
             "customers and revenue — and should we scale this campaign?"
         ),
     },
+    {
+        "id": "roi",
+        "icon": "📊",
+        "stage": "ROI Planning",
+        "title": "Spend & ROI Matrix",
+        "question": (
+            "Show me the ROI planning matrix for 344,286 eligible customers at a 6.24% "
+            "baseline conversion rate. I want to see estimated spend, expected TTV, and "
+            "NTM increase at 6.24%, 8%, 10%, and 15% conversion scenarios. Also show me "
+            "the minimum population size needed at different lift levels."
+        ),
+    },
 ]
 
 # ── Session state ─────────────────────────────────────────────────────────────
@@ -390,6 +402,22 @@ def extract_verdict(text: str, tool_results: list) -> dict:
                     "days_to_sig": data.get("estimated_days_to_sig"),
                     "expected_i_customers": data.get("expected_i_customers"),
                     "expected_i_ttv": data.get("expected_i_ttv"),
+                })
+            # ROI matrix result
+            if "fixed_roi_pct" in data:
+                scenarios = data.get("scenarios", [])
+                # Pull NTM from highest CVR scenario
+                best = max(scenarios, key=lambda s: s.get("cvr", 0)) if scenarios else {}
+                min_sample = data.get("min_sample_by_lift", [])
+                smallest = min_sample[0] if min_sample else {}
+                v.update({
+                    "is_sig": None,
+                    "recommendation": "SIZE_AND_LAUNCH",
+                    "roi_pct": data.get("fixed_roi_pct"),
+                    "best_ntm": best.get("ntm_increase"),
+                    "best_cvr": best.get("cvr_pct"),
+                    "min_n_per_arm": smallest.get("n_per_arm"),
+                    "min_lift_delta": smallest.get("lift_pp"),
                 })
         except Exception:
             pass
@@ -469,6 +497,21 @@ def render_verdict_panel():
         label = "Est. Days to Sig" if is_sig is None else "Days Needed (at current rate)"
         metrics.append(("metric-warn", label, str(ds), "to reach significance"))
 
+    # ROI matrix metrics
+    roi = v.get("roi_pct")
+    if roi is not None:
+        metrics.append(("metric-pos", "Fixed ROI", f"{roi:.1f}%", "per incremental conversion"))
+
+    best_ntm = v.get("best_ntm")
+    best_cvr = v.get("best_cvr")
+    if best_ntm is not None:
+        metrics.append(("metric-pos", f"NTM @ {best_cvr or '15%'}", f"${best_ntm:,.0f}", "at highest CVR scenario"))
+
+    min_n = v.get("min_n_per_arm")
+    min_lift = v.get("min_lift_delta")
+    if min_n is not None:
+        metrics.append(("metric-warn", f"Min N/Arm ({min_lift})", f"{min_n:,}", "smallest detectable lift"))
+
     if metrics:
         html = '<div class="metric-row">'
         for cls, label, val, sub in metrics:
@@ -499,8 +542,8 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Scenario buttons row
-c1, c2, c3 = st.columns(3)
-for col, sc in zip([c1, c2, c3], SCENARIOS):
+c1, c2, c3, c4 = st.columns(4)
+for col, sc in zip([c1, c2, c3, c4], SCENARIOS):
     with col:
         active = "🔵 " if st.session_state.active_scenario == sc["id"] else ""
         if st.button(f"{sc['icon']} {active}{sc['stage']}: {sc['title']}", key=f"sc_{sc['id']}"):
