@@ -702,4 +702,4 @@ if question and stream_ctx is not None:
     st.session_state.verdict = extract_verdict(accumulated, tool_results_turn)
     st.rerun()
 
-# build-stamp: 2026-05-13 16:31 UTC
+# build-stamp: 2026-05-13 16:37 UTC
