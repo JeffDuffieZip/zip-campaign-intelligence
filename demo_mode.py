@@ -792,6 +792,122 @@ def _handle_comparison(text: str) -> Generator[dict, None, None]:
     yield {"type": "done"}
 
 
+def _handle_roi_matrix(
+    eligible_pop: int = 344_286,
+    baseline_cvr: float = 0.0624,
+    avg_order_value: float = 126.50,
+    ntm_margin: float = 0.4144,
+    incentive_cost: float = 10.0,
+) -> Generator[dict, None, None]:
+    """
+    Pre-campaign ROI planning matrix — mirrors the spreadsheet view.
+    Shows conversions, cost, TTV, NTM increase and ROI at 4 CVR scenarios.
+    Also shows minimum sample size at different lift deltas.
+    """
+    import math
+    from scipy.stats import norm
+    from tools.stats import required_sample_size
+
+    target_cvrs = [baseline_cvr, 0.08, 0.10, 0.15]
+    control_conv = round(eligible_pop * baseline_cvr)
+    control_ttv  = round(control_conv * avg_order_value)
+    fixed_roi    = round((avg_order_value * ntm_margin / incentive_cost - 1) * 100, 1)
+
+    # Build scenario rows
+    scenarios = []
+    for cvr in sorted(set(target_cvrs)):
+        conv = round(eligible_pop * cvr)
+        cost = round(conv * incentive_cost)
+        ttv  = round(conv * avg_order_value)
+        ntm  = round(ttv * ntm_margin)
+        scenarios.append({
+            "cvr": cvr, "conversions": conv,
+            "cost": cost, "ttv": ttv, "ntm": ntm,
+        })
+
+    # Build min-sample table
+    deltas = [0.002, 0.004, 0.006, 0.008, 0.010, 0.0176, 0.0276]
+    sample_rows = []
+    for d in deltas:
+        p2 = round(baseline_cvr + d, 6)
+        n  = required_sample_size(baseline_cvr, p2)
+        sample_rows.append({"delta": d, "target_cvr": p2, "n_per_arm": n, "n_total": n * 2,
+                             "cost": round(n * p2 * incentive_cost)})
+
+    # Emit tool calls so verdict panel populates
+    matrix_result = {
+        "eligible_population": eligible_pop,
+        "baseline_cvr": f"{baseline_cvr*100:.2f}%",
+        "avg_order_value": avg_order_value,
+        "ntm_margin_pct": f"{ntm_margin*100:.2f}%",
+        "incentive_cost": incentive_cost,
+        "fixed_roi_pct": fixed_roi,
+        "scenarios": scenarios,
+        "min_sample_by_lift": sample_rows,
+    }
+    yield from _tool_call("roi_matrix",
+                          {"eligible_pop": eligible_pop, "baseline_cvr": baseline_cvr},
+                          matrix_result)
+
+    # ── Scenario table (markdown) ──────────────────────────────────────────────
+    scen_rows = ""
+    for s in scenarios:
+        scen_rows += (
+            f"| **{s['cvr']*100:.2f}%** | "
+            f"{eligible_pop:,} | "
+            f"{control_conv:,} | "
+            f"{s['conversions']:,} | "
+            f"${s['cost']:,.0f} | "
+            f"${s['ttv']:,.0f} | "
+            f"${control_ttv:,.0f} | "
+            f"${s['ttv']+control_ttv:,.0f} | "
+            f"**${s['ntm']:,.0f}** | "
+            f"**{fixed_roi:.1f}%** |\n"
+        )
+
+    # ── Min-sample table (markdown) ───────────────────────────────────────────
+    sample_table_rows = ""
+    for r in sample_rows:
+        sample_table_rows += (
+            f"| +{r['delta']*100:.2f} pp → {r['target_cvr']*100:.2f}% | "
+            f"{r['n_per_arm']:,} | "
+            f"{r['n_per_arm']:,} | "
+            f"{r['n_total']:,} | "
+            f"${r['cost']:,.0f} |\n"
+        )
+
+    narrative = f"""### Pre-Campaign ROI Matrix
+
+**Population:** {eligible_pop:,} · **Baseline CVR:** {baseline_cvr*100:.2f}% · **AOV:** ${avg_order_value:.2f} · **NTM Margin:** {ntm_margin*100:.1f}% · **Incentive:** ${incentive_cost:.0f}/conversion
+
+---
+
+#### Estimated Spend & ROI by Conversion Rate (50/50 Split)
+
+| CVR Scenario | $10 Group Pop | Control Conv | Treatment Conv | Cost | TTV (Treatment) | TTV (Control) | TTV Total | NTM Increase | ROI |
+|---|---|---|---|---|---|---|---|---|---|
+{scen_rows}
+> **ROI is constant at {fixed_roi:.1f}%** regardless of CVR — because ROI = (AOV × NTM margin ÷ incentive) − 1. Every incremental conversion at any CVR returns the same unit economics.
+
+---
+
+#### Minimum Population Size by Expected Conversion Rate
+
+Baseline: **{baseline_cvr*100:.2f}%** · Required confidence: 95% · Power: 80%
+
+| Lift Delta | $10 Group | Control | Total | Cost |
+|---|---|---|---|---|
+{sample_table_rows}
+> Smallest detectable lift requires the most users. A **+{deltas[0]*100:.2f} pp lift** (reaching {(baseline_cvr+deltas[0])*100:.2f}%) needs {sample_rows[0]['n_per_arm']:,} per arm. A **+{deltas[-1]*100:.2f} pp lift** needs just {sample_rows[-1]['n_per_arm']:,}.
+
+---
+
+**Key Takeaway:** At a {baseline_cvr*100:.2f}% baseline CVR, you need **{sample_rows[0]['n_per_arm']:,} users per arm** to detect a small +0.20 pp lift. If you expect a larger lift (~{deltas[2]*100:.2f} pp), the test only needs {sample_rows[2]['n_per_arm']:,} per arm — feasible with a fraction of your eligible population.
+"""
+    yield from _stream_text(narrative)
+    yield {"type": "done"}
+
+
 def _handle_generic(text: str) -> Generator[dict, None, None]:
     """Fallback — list available capabilities."""
     narrative = (
@@ -804,9 +920,10 @@ def _handle_generic(text: str) -> Generator[dict, None, None]:
         f"| 4 | **Compare two campaigns** | *Compare July 4th and Memorial Day* |\n"
         f"| 5 | **Find similar campaigns** | *What campaigns are similar to Wayfair?* |\n"
         f"| 6 | **Size a new campaign** | Click the 📋 Pre-Campaign scenario above |\n"
-        f"| 7 | **Portfolio rollup** | *Summarize all email campaigns this year* |\n"
-        f"| 8 | **List campaigns** | *List all campaigns* |\n"
-        f"| 9 | **Segment baselines** | *What's the Best Buy New baseline CVR?* |\n\n"
+        f"| 7 | **ROI planning matrix** | *Show me the ROI matrix for 344k customers at 6.24% baseline* |\n"
+        f"| 8 | **Portfolio rollup** | *Summarize all email campaigns this year* |\n"
+        f"| 9 | **List campaigns** | *List all campaigns* |\n"
+        f"| 10 | **Segment baselines** | *What's the Best Buy New baseline CVR?* |\n\n"
         f"Every campaign lookup also includes a **Similar past campaigns** section automatically — "
         f"so you always get historical context with your recommendation.\n\n"
         f"Or click any of the three demo scenarios at the top of the page."
@@ -973,6 +1090,24 @@ def stream_demo_response(messages: list[dict]) -> Generator[dict, None, None]:
             if s.lower().replace("_", " ") in text_lower:
                 seg = s; break
         yield from _handle_segment_baselines(seg); return
+
+    # ROI matrix / pre-campaign planning view
+    if any(k in text_lower for k in [
+        "roi matrix", "roi table", "roi view", "roi planning",
+        "expected roi", "what roi", "spend and roi",
+        "conversion rate table", "cvr scenarios", "multiple cvr",
+        "6.24", "6% conversion", "8% conversion", "10% conversion", "15% conversion",
+        "minimum population", "minimum sample", "min sample size",
+        "ntm increase", "net transaction margin",
+        "estimated spend", "planning matrix",
+    ]):
+        # Parse eligible population if mentioned (e.g. "344,286 customers")
+        pop_match = re.search(r"(\d[\d,]{3,})\s*(?:customers|users|eligible|people)?", text_lower)
+        pop = int(pop_match.group(1).replace(",", "")) if pop_match else 344_286
+        # Parse baseline CVR if mentioned
+        cvr_match = re.search(r"(\d+\.?\d*)\s*%\s*(?:baseline|conversion|cvr)", text_lower)
+        base_cvr = float(cvr_match.group(1)) / 100 if cvr_match else 0.0624
+        yield from _handle_roi_matrix(eligible_pop=pop, baseline_cvr=base_cvr); return
 
     # Free-form stat sig (numbers provided)
     stats_inputs = _extract_stats_inputs(text)

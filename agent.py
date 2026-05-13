@@ -208,6 +208,54 @@ TOOLS: list[dict] = [
             "required": [],
         },
     },
+    {
+        "name": "roi_matrix",
+        "description": (
+            "Pre-campaign ROI planning matrix. "
+            "Given a population size and baseline CVR, generates a multi-scenario table showing: "
+            "conversions, incentive cost, expected TTV, increase in Net Transaction Margin (NTM), and ROI "
+            "at 4 CVR scenarios (baseline, 8%, 10%, 15%). "
+            "Also returns a minimum-sample-size table showing how many users per arm are needed at "
+            "each conversion lift level (+0.20pp through +3pp). "
+            "Use for pre-campaign planning when stakeholders ask: 'What ROI can we expect?' or "
+            "'How large does my audience need to be?'"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "eligible_pop": {
+                    "type": "integer",
+                    "description": "Total eligible customers available for the test (treatment arm size).",
+                },
+                "baseline_cvr": {
+                    "type": "number",
+                    "description": "Baseline (control) CVR as decimal. E.g. 0.0624 for 6.24%. If omitted, defaults to 0.0624.",
+                    "default": 0.0624,
+                },
+                "avg_order_value": {
+                    "type": "number",
+                    "description": "Average order value in dollars. Default 126.50.",
+                    "default": 126.50,
+                },
+                "ntm_margin": {
+                    "type": "number",
+                    "description": "Net Transaction Margin as decimal (e.g. 0.4144 = 41.44%). Default 0.4144.",
+                    "default": 0.4144,
+                },
+                "incentive_cost": {
+                    "type": "number",
+                    "description": "Incentive cost per conversion in dollars. Default 10.",
+                    "default": 10.0,
+                },
+                "target_cvrs": {
+                    "type": "array",
+                    "items": {"type": "number"},
+                    "description": "CVR scenarios to model (as decimals). Defaults to [baseline, 0.08, 0.10, 0.15].",
+                },
+            },
+            "required": ["eligible_pop"],
+        },
+    },
 ]
 
 # ── Tool implementations ──────────────────────────────────────────────────────
@@ -368,6 +416,88 @@ def _calculate_stat_sig_enriched(
     return result
 
 
+def _roi_matrix(
+    eligible_pop: int,
+    baseline_cvr: float = 0.0624,
+    avg_order_value: float = 126.50,
+    ntm_margin: float = 0.4144,
+    incentive_cost: float = 10.0,
+    target_cvrs: list = None,
+) -> dict:
+    """
+    Multi-scenario ROI planning matrix.
+
+    For each CVR scenario returns:
+      conversions, cost (incentive × conversions), expected TTV,
+      increase in NTM (TTV × ntm_margin), and ROI (NTM / cost - 1).
+
+    Also returns a minimum sample-size table at different lift deltas.
+    """
+    if target_cvrs is None:
+        target_cvrs = [baseline_cvr, 0.08, 0.10, 0.15]
+    # Ensure baseline is always the first row
+    if baseline_cvr not in target_cvrs:
+        target_cvrs = [baseline_cvr] + list(target_cvrs)
+
+    control_conversions = round(eligible_pop * baseline_cvr)
+    control_ttv         = round(control_conversions * avg_order_value)
+    control_ntm         = round(control_ttv * ntm_margin)
+
+    # ── Scenario table ────────────────────────────────────────────────────────
+    scenarios = []
+    for cvr in sorted(set(target_cvrs)):
+        conversions = round(eligible_pop * cvr)
+        cost        = round(conversions * incentive_cost)
+        ttv         = round(conversions * avg_order_value)
+        ntm         = round(ttv * ntm_margin)
+        roi         = round((ntm / cost - 1) * 100, 1) if cost > 0 else None
+        scenarios.append({
+            "cvr_pct":              f"{cvr * 100:.2f}%",
+            "cvr":                  round(cvr, 4),
+            "population_size":      eligible_pop,
+            "conversions_treatment": conversions,
+            "conversions_control":  control_conversions,
+            "cost":                 cost,
+            "ttv_treatment":        ttv,
+            "ttv_control":          control_ttv,
+            "ttv_total":            ttv + control_ttv,
+            "ntm_increase":         ntm,
+            "roi_pct":              roi,
+        })
+
+    # ── Minimum sample size by lift delta ─────────────────────────────────────
+    lift_deltas = [0.002, 0.004, 0.006, 0.008, 0.010, 0.0176, 0.0276]
+    min_sample_rows = []
+    for delta in lift_deltas:
+        p2   = round(baseline_cvr + delta, 6)
+        n    = required_sample_size(baseline_cvr, p2)
+        cost = round(n * p2 * incentive_cost)
+        min_sample_rows.append({
+            "lift_pp":      f"+{delta * 100:.2f}pp",
+            "target_cvr":   f"{p2 * 100:.2f}%",
+            "n_per_arm":    n,
+            "n_total":      n * 2,
+            "cost":         cost,
+        })
+
+    # ── Fixed ROI formula note ────────────────────────────────────────────────
+    # ROI = (AOV × NTM_margin / incentive_cost) - 1
+    fixed_roi = round((avg_order_value * ntm_margin / incentive_cost - 1) * 100, 1)
+
+    return {
+        "eligible_population":   eligible_pop,
+        "baseline_cvr":          f"{baseline_cvr * 100:.2f}%",
+        "avg_order_value":       avg_order_value,
+        "ntm_margin_pct":        f"{ntm_margin * 100:.2f}%",
+        "incentive_cost":        incentive_cost,
+        "fixed_roi_pct":         fixed_roi,  # constant regardless of CVR
+        "control_conversions":   control_conversions,
+        "control_ttv":           control_ttv,
+        "scenarios":             scenarios,
+        "min_sample_by_lift":    min_sample_rows,
+    }
+
+
 def _dispatch_tool(name: str, inputs: dict) -> str:
     try:
         if name == "list_campaigns":
@@ -386,6 +516,8 @@ def _dispatch_tool(name: str, inputs: dict) -> str:
             result = _size_campaign(**inputs)
         elif name == "get_segment_baselines":
             result = _get_segment_baselines(**inputs)
+        elif name == "roi_matrix":
+            result = _roi_matrix(**inputs)
         else:
             result = {"error": f"Unknown tool: {name}"}
     except Exception as exc:
