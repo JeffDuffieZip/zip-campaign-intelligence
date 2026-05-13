@@ -793,116 +793,286 @@ def _handle_comparison(text: str) -> Generator[dict, None, None]:
 
 
 def _handle_roi_matrix(
-    eligible_pop: int = 344_286,
-    baseline_cvr: float = 0.0624,
+    eligible_pop: int = None,
+    baseline_cvr: float = None,
     avg_order_value: float = 126.50,
     ntm_margin: float = 0.4144,
     incentive_cost: float = 10.0,
 ) -> Generator[dict, None, None]:
     """
-    Pre-campaign ROI planning matrix — mirrors the spreadsheet view.
-    Shows conversions, cost, TTV, NTM increase and ROI at 4 CVR scenarios.
-    Also shows minimum sample size at different lift deltas.
+    Generic ROI planning matrix — compares all CVR tiers, recommends best scenario.
+    No specific campaign required. Shows the full spend/TTV/NTM/ROI picture.
     """
-    import math
-    from scipy.stats import norm
     from tools.stats import required_sample_size
 
-    target_cvrs = [baseline_cvr, 0.08, 0.10, 0.15]
-    control_conv = round(eligible_pop * baseline_cvr)
-    control_ttv  = round(control_conv * avg_order_value)
-    fixed_roi    = round((avg_order_value * ntm_margin / incentive_cost - 1) * 100, 1)
+    fixed_roi = round((avg_order_value * ntm_margin / incentive_cost - 1) * 100, 1)
 
-    # Build scenario rows
-    scenarios = []
-    for cvr in sorted(set(target_cvrs)):
-        conv = round(eligible_pop * cvr)
-        cost = round(conv * incentive_cost)
-        ttv  = round(conv * avg_order_value)
-        ntm  = round(ttv * ntm_margin)
-        scenarios.append({
-            "cvr": cvr, "conversions": conv,
-            "cost": cost, "ttv": ttv, "ntm": ntm,
+    # ── Three CVR tiers from segment baselines ────────────────────────────────
+    tiers = [
+        {"label": "Mid (6%)",       "cvr": 0.0600, "segment": "Fashion_Nova_Loyalist", "pop": 50_000,  "lift_pct": 10},
+        {"label": "High (8%)",      "cvr": 0.0800, "segment": "App_Deals_Seasonal",    "pop": 150_000, "lift_pct": 10},
+        {"label": "Very High (10%)","cvr": 0.1000, "segment": "App_Deals_High_Intent", "pop": 150_000, "lift_pct": 10},
+    ]
+
+    # If caller supplied a specific baseline/pop, add it as a custom tier
+    if baseline_cvr is not None and eligible_pop is not None:
+        tiers.insert(0, {"label": f"Custom ({baseline_cvr*100:.1f}%)",
+                         "cvr": baseline_cvr, "segment": "custom",
+                         "pop": eligible_pop, "lift_pct": 10})
+
+    # Pre-compute per tier
+    for t in tiers:
+        p1    = t["cvr"]
+        p2    = round(p1 * (1 + t["lift_pct"] / 100), 6)
+        n_arm = required_sample_size(p1, p2)
+        pop   = t["pop"]
+        daily = pop / 30
+        days  = max(1, round((n_arm * 2) / daily))
+
+        conv_treat  = round(pop * p2)
+        conv_ctrl   = round(pop * p1)
+        cost        = round(conv_treat * incentive_cost)
+        ttv_treat   = round(conv_treat * avg_order_value)
+        ttv_ctrl    = round(conv_ctrl  * avg_order_value)
+        ntm         = round(ttv_treat * ntm_margin)
+        i_customers = round((p2 - p1) * n_arm)
+        i_ttv       = round(i_customers * avg_order_value)
+
+        t.update({
+            "p2": p2, "n_arm": n_arm, "days": days,
+            "conv_treat": conv_treat, "conv_ctrl": conv_ctrl,
+            "cost": cost, "ttv_treat": ttv_treat, "ttv_ctrl": ttv_ctrl,
+            "ntm": ntm, "i_customers": i_customers, "i_ttv": i_ttv,
         })
 
-    # Build min-sample table
-    deltas = [0.002, 0.004, 0.006, 0.008, 0.010, 0.0176, 0.0276]
-    sample_rows = []
-    for d in deltas:
-        p2 = round(baseline_cvr + d, 6)
-        n  = required_sample_size(baseline_cvr, p2)
-        sample_rows.append({"delta": d, "target_cvr": p2, "n_per_arm": n, "n_total": n * 2,
-                             "cost": round(n * p2 * incentive_cost)})
+    # ── Pick best scenario ────────────────────────────────────────────────────
+    # Score = NTM / days (most NTM in shortest time)
+    best = max(tiers, key=lambda t: t["ntm"] / max(t["days"], 1))
 
-    # Emit tool calls so verdict panel populates
+    # Emit a tool result so the verdict panel populates
     matrix_result = {
-        "eligible_population": eligible_pop,
-        "baseline_cvr": f"{baseline_cvr*100:.2f}%",
-        "avg_order_value": avg_order_value,
-        "ntm_margin_pct": f"{ntm_margin*100:.2f}%",
-        "incentive_cost": incentive_cost,
         "fixed_roi_pct": fixed_roi,
-        "scenarios": scenarios,
-        "min_sample_by_lift": sample_rows,
+        "scenarios": [
+            {"cvr_pct": f"{t['cvr']*100:.0f}%", "ntm_increase": t["ntm"],
+             "cost": t["cost"], "days_to_sig": t["days"]}
+            for t in tiers
+        ],
+        "min_sample_by_lift": [
+            {"lift_pp": f"+{(t['p2']-t['cvr'])*100:.2f}pp",
+             "n_per_arm": t["n_arm"], "n_total": t["n_arm"] * 2}
+            for t in tiers
+        ],
+        "best_scenario": best["label"],
     }
-    yield from _tool_call("roi_matrix",
-                          {"eligible_pop": eligible_pop, "baseline_cvr": baseline_cvr},
-                          matrix_result)
+    yield from _tool_call("roi_matrix", {"mode": "multi_tier_comparison"}, matrix_result)
 
-    # ── Scenario table (markdown) ──────────────────────────────────────────────
-    scen_rows = ""
-    for s in scenarios:
-        scen_rows += (
-            f"| **{s['cvr']*100:.2f}%** | "
-            f"{eligible_pop:,} | "
-            f"{control_conv:,} | "
-            f"{s['conversions']:,} | "
-            f"${s['cost']:,.0f} | "
-            f"${s['ttv']:,.0f} | "
-            f"${control_ttv:,.0f} | "
-            f"${s['ttv']+control_ttv:,.0f} | "
-            f"**${s['ntm']:,.0f}** | "
+    # ── Summary comparison table ──────────────────────────────────────────────
+    comp_rows = ""
+    for t in tiers:
+        star = " ⭐" if t is best else ""
+        comp_rows += (
+            f"| **{t['label']}{star}** | "
+            f"{t['pop']:,} | "
+            f"{t['n_arm']:,} | "
+            f"{t['days']}d | "
+            f"${t['cost']:,.0f} | "
+            f"${t['ttv_treat']:,.0f} | "
+            f"**${t['ntm']:,.0f}** | "
             f"**{fixed_roi:.1f}%** |\n"
         )
 
-    # ── Min-sample table (markdown) ───────────────────────────────────────────
-    sample_table_rows = ""
-    for r in sample_rows:
-        sample_table_rows += (
-            f"| +{r['delta']*100:.2f} pp → {r['target_cvr']*100:.2f}% | "
-            f"{r['n_per_arm']:,} | "
-            f"{r['n_per_arm']:,} | "
-            f"{r['n_total']:,} | "
-            f"${r['cost']:,.0f} |\n"
-        )
+    # ── Per-tier detail cards ──────────────────────────────────────────────────
+    tier_cards = ""
+    for t in tiers:
+        star = "⭐ **Best scenario**" if t is best else ""
+        tier_cards += f"""
+**{t['label']}** {star}
+- Segment: `{t['segment']}` · Eligible population: {t['pop']:,}
+- Baseline CVR: **{t['cvr']*100:.1f}%** → Target CVR: **{t['p2']*100:.2f}%** (+{t['lift_pct']}% lift)
+- Required per arm: **{t['n_arm']:,}** · Est. days to significance: **{t['days']} days**
+- Treatment conversions: {t['conv_treat']:,} · Cost: **${t['cost']:,.0f}**
+- Expected TTV: ${t['ttv_treat']:,.0f} · **NTM increase: ${t['ntm']:,.0f}** · ROI: {fixed_roi:.1f}%
 
-    narrative = f"""### Pre-Campaign ROI Matrix
+"""
 
-**Population:** {eligible_pop:,} · **Baseline CVR:** {baseline_cvr*100:.2f}% · **AOV:** ${avg_order_value:.2f} · **NTM Margin:** {ntm_margin*100:.1f}% · **Incentive:** ${incentive_cost:.0f}/conversion
+    narrative = f"""### ROI Planning Matrix — All CVR Tiers
 
----
-
-#### Estimated Spend & ROI by Conversion Rate (50/50 Split)
-
-| CVR Scenario | $10 Group Pop | Control Conv | Treatment Conv | Cost | TTV (Treatment) | TTV (Control) | TTV Total | NTM Increase | ROI |
-|---|---|---|---|---|---|---|---|---|---|
-{scen_rows}
-> **ROI is constant at {fixed_roi:.1f}%** regardless of CVR — because ROI = (AOV × NTM margin ÷ incentive) − 1. Every incremental conversion at any CVR returns the same unit economics.
+**AOV:** ${avg_order_value:.2f} · **NTM Margin:** {ntm_margin*100:.1f}% · **Incentive:** ${incentive_cost:.0f}/conversion · **Fixed ROI:** {fixed_roi:.1f}%
 
 ---
 
-#### Minimum Population Size by Expected Conversion Rate
+#### Tier Comparison (10% relative lift target, 95% CI, 80% power)
 
-Baseline: **{baseline_cvr*100:.2f}%** · Required confidence: 95% · Power: 80%
-
-| Lift Delta | $10 Group | Control | Total | Cost |
-|---|---|---|---|---|
-{sample_table_rows}
-> Smallest detectable lift requires the most users. A **+{deltas[0]*100:.2f} pp lift** (reaching {(baseline_cvr+deltas[0])*100:.2f}%) needs {sample_rows[0]['n_per_arm']:,} per arm. A **+{deltas[-1]*100:.2f} pp lift** needs just {sample_rows[-1]['n_per_arm']:,}.
+| Segment Tier | Population | Min N/Arm | Days to Sig | Cost | Expected TTV | NTM Increase | ROI |
+|---|---|---|---|---|---|---|---|
+{comp_rows}
+> ⭐ **Best scenario: {best['label']}** — highest NTM per day. Reaches significance in **{best['days']} days** with **${best['ntm']:,.0f}** in incremental NTM.
 
 ---
 
-**Key Takeaway:** At a {baseline_cvr*100:.2f}% baseline CVR, you need **{sample_rows[0]['n_per_arm']:,} users per arm** to detect a small +0.20 pp lift. If you expect a larger lift (~{deltas[2]*100:.2f} pp), the test only needs {sample_rows[2]['n_per_arm']:,} per arm — feasible with a fraction of your eligible population.
+#### Tier Detail
+
+{tier_cards}
+---
+
+#### Why ROI is constant at {fixed_roi:.1f}% across all tiers
+
+ROI depends only on unit economics — not on how many people convert:
+
+> **ROI = (AOV × NTM margin ÷ incentive cost) − 1**
+> = (${avg_order_value:.2f} × {ntm_margin*100:.1f}% ÷ ${incentive_cost:.0f}) − 1 = **{fixed_roi:.1f}%**
+
+Every incremental conversion at any CVR level returns the same margin. The CVR tier affects **speed** (days to significance) and **scale** (total NTM), not the per-conversion ROI.
+
+**Choose your tier based on:**
+- 🏃 **Speed**: Higher CVR → smaller sample needed → faster read
+- 💰 **Scale**: Larger eligible population → more NTM at the same ROI
+- 🎯 **Confidence**: Higher CVR baseline → signal is easier to detect cleanly
+"""
+    yield from _stream_text(narrative)
+    yield {"type": "done"}
+
+
+def _handle_formula_readme() -> Generator[dict, None, None]:
+    """Complete formula guide — explains every metric and decision rule."""
+    yield from _tool_call("get_segment_baselines", {}, SEGMENT_BASELINES)
+
+    narrative = """### 📖 Formula & Methodology Guide
+
+Everything the agent does is based on three statistical building blocks. Here's the full picture.
+
+---
+
+#### 1. Statistical Significance — Two-Proportion Z-Test
+
+We test whether the treatment CVR is genuinely different from control, or just random variation.
+
+**Step 1 — Pooled proportion:**
+```
+p_pooled = (conversions_target + conversions_control)
+           / (audience_target + audience_control)
+```
+
+**Step 2 — Standard error:**
+```
+SE = √[ p_pooled × (1 − p_pooled) × (1/n_target + 1/n_control) ]
+```
+
+**Step 3 — T-statistic:**
+```
+t_stat = (CVR_target − CVR_control) / SE
+```
+
+**Confidence thresholds:**
+
+| t-stat | Confidence | Meaning |
+|---|---|---|
+| \|t\| > 2.576 | **99%** | Very strong — scale with confidence |
+| \|t\| > 1.960 | **95%** | Standard threshold — result is real |
+| \|t\| > 1.282 | **90%** | Early signal — watch closely |
+| \|t\| ≤ 1.282 | **Not significant** | Could be random chance |
+
+---
+
+#### 2. Incrementality Metrics
+
+Raw conversions are misleading — some customers would have converted anyway. These metrics isolate the *campaign's* contribution.
+
+**iCustomers** — how many extra customers converted *because* of the campaign:
+```
+iCustomers = CVR_delta × audience_target
+           = (CVR_target − CVR_control) × n_target
+```
+
+**iTTV** — incremental revenue directly attributable to the campaign:
+```
+iTTV = (CVR_delta / CVR_target) × TTV_target
+```
+
+**Cannibalization rate** — share of converting customers who would have converted without the campaign:
+```
+Cannibalization = 1 − (iCustomers / converting_target)
+```
+
+| Cannibalization | Interpretation |
+|---|---|
+| < 40% | ✅ Strong — majority incremental. **SCALE.** |
+| 40–60% | ⚠️ Mixed — incentive partly rewards organic behaviour. **WATCH.** |
+| > 60% | 🔴 High — majority organic. ROI is overstated. **RETHINK.** |
+
+---
+
+#### 3. Minimum Sample Size — Pre-Campaign Sizing
+
+How many users do you need in each arm to reliably detect a lift?
+
+```
+n_per_arm = [(z_α + z_β)² × (p1(1−p1) + p2(1−p2))] / (p1 − p2)²
+```
+
+Where:
+- `p1` = baseline (control) CVR
+- `p2` = expected treatment CVR = p1 × (1 + lift%)
+- `z_α = 1.96` for 95% confidence (two-tailed)
+- `z_β = 0.842` for 80% statistical power
+
+**Projected days to significance:**
+```
+days = ceil(n_required_total / daily_entry_rate)
+daily_entry_rate ≈ eligible_population / 30
+```
+
+---
+
+#### 4. ROI Formula
+
+Unit economics of the incentive programme — constant regardless of CVR:
+
+```
+ROI = (AOV × NTM_margin / incentive_cost) − 1
+```
+
+| Input | Default | Source |
+|---|---|---|
+| AOV (avg order value) | $126.50 | Blended across segments |
+| NTM margin | 41.44% | Net Transaction Margin rate |
+| Incentive cost | $10 | Per-conversion offer cost |
+| **Fixed ROI** | **424.3%** | Constant across all CVR levels |
+
+---
+
+#### 5. Decision Framework — When to SCALE, EXTEND, STOP
+
+| Recommendation | When | Action |
+|---|---|---|
+| 🟢 **SCALE** | Stat sig positive + cannibalization < 40% | Roll out to full segment |
+| 🟢 **SCALE** | Stat sig positive + strong lift (99% CI) | Productionise the playbook |
+| 🔵 **EXTEND** | \|t\| ≥ 1.5 but < 1.96 | Run longer or add audience |
+| 🟡 **ITERATE** | \|t\| 0.8–1.5 | Weak signal — change creative or segment |
+| 🟡 **WATCH** | Sig but cannibalization 40–60% | Monitor before scaling |
+| 🔴 **RETHINK** | Stat sig *negative* | Campaign hurt conversions — investigate |
+| 🔴 **STOP** | \|t\| < 0.8 after large sample | No signal — reallocate budget |
+
+---
+
+#### 6. Segment Baseline CVRs
+
+Historical control-arm CVRs used for pre-campaign sizing:
+
+| Segment | Avg CVR | Range | Campaigns |
+|---|---|---|---|
+| BAU Billpay | 20.79% | — | 1 |
+| App Deals High Intent | 10.00% | 9.2–11.3% | 4 |
+| App Deals Seasonal | 8.00% | 7.2–9.1% | 5 |
+| App Deals (all) | 8.94% | 6.4–13.5% | 9 |
+| Fashion Nova Loyalist | 6.00% | 5.4–6.8% | 3 |
+| Gift Cards | 2.59% | — | 1 |
+| Weekly Deals | 2.17% | — | 1 |
+| Best Buy Repeat | 1.35% | 1.1–1.6% | 4 |
+| Best Buy Past | 1.29% | — | 1 |
+| Best Buy New | 1.06% | 1.0–1.3% | 6 |
+
+> **Rule of thumb:** Never benchmark a Best Buy New Purchaser test against App Deals numbers. A "bad" App Deals result (1% CVR) is a "great" Best Buy New result.
 """
     yield from _stream_text(narrative)
     yield {"type": "done"}
@@ -1090,6 +1260,17 @@ def stream_demo_response(messages: list[dict]) -> Generator[dict, None, None]:
             if s.lower().replace("_", " ") in text_lower:
                 seg = s; break
         yield from _handle_segment_baselines(seg); return
+
+    # Formula / methodology README guide
+    if any(k in text_lower for k in [
+        "formula", "readme", "how it works", "how does it work",
+        "all the formulas", "explain the formula", "methodology",
+        "how is significance", "what is icustomers", "how are you calculating",
+        "cannibalization formula", "sample size formula", "how does the agent",
+        "explain all", "how do you calculate", "formula guide",
+        "how everything works", "explain the metrics", "what does each metric",
+    ]):
+        yield from _handle_formula_readme(); return
 
     # ROI matrix / pre-campaign planning view
     if any(k in text_lower for k in [

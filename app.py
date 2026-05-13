@@ -345,10 +345,23 @@ SCENARIOS = [
         "stage": "ROI Planning",
         "title": "Spend & ROI Matrix",
         "question": (
-            "Show me the ROI planning matrix for 344,286 eligible customers at a 6.24% "
-            "baseline conversion rate. I want to see estimated spend, expected TTV, and "
-            "NTM increase at 6.24%, 8%, 10%, and 15% conversion scenarios. Also show me "
-            "the minimum population size needed at different lift levels."
+            "Show me the ROI planning matrix across all our CVR tiers. "
+            "I want to see estimated spend, expected TTV, NTM increase, and ROI "
+            "at different conversion rate scenarios — and tell me which scenario "
+            "gives the best outcome and why."
+        ),
+    },
+    {
+        "id": "readme",
+        "icon": "📖",
+        "stage": "Formula Guide",
+        "title": "How It All Works",
+        "question": (
+            "Can you explain all the formulas and methodology the agent uses? "
+            "I want to understand: how statistical significance is calculated, "
+            "what iCustomers and iTTV mean, how sample size is determined, "
+            "what cannibalization rate tells us, and how the SCALE / EXTEND / "
+            "ITERATE / STOP / RETHINK / WATCH recommendations are made."
         ),
     },
 ]
@@ -542,8 +555,8 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Scenario buttons row
-c1, c2, c3, c4 = st.columns(4)
-for col, sc in zip([c1, c2, c3, c4], SCENARIOS):
+c1, c2, c3, c4, c5 = st.columns(5)
+for col, sc in zip([c1, c2, c3, c4, c5], SCENARIOS):
     with col:
         active = "🔵 " if st.session_state.active_scenario == sc["id"] else ""
         if st.button(f"{sc['icon']} {active}{sc['stage']}: {sc['title']}", key=f"sc_{sc['id']}"):
