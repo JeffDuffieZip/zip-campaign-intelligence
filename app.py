@@ -970,13 +970,13 @@ try:
         cwd=os.path.dirname(os.path.abspath(__file__)),
         stderr=subprocess.DEVNULL,
     ).decode().strip() or "—"
-    _last_date = subprocess.check_output(
-        ["git", "log", "-1", "--pretty=format:%ad", "--date=format:%d %b %Y"],
+    _last_datetime = subprocess.check_output(
+        ["git", "log", "-1", "--pretty=format:%ad", "--date=format:%d %b %Y · %H:%M"],
         cwd=os.path.dirname(os.path.abspath(__file__)),
         stderr=subprocess.DEVNULL,
-    ).decode().strip() or ""
+    ).decode().strip() or _now
 except Exception:
-    _last_author, _last_date = "—", ""
+    _last_author, _last_datetime = "—", _now
 st.markdown(f"""
 <div class="zip-header">
   <div class="zip-logo-wrap">
@@ -1006,8 +1006,7 @@ st.markdown(f"""
   </div>
   <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
     <span class="zip-badge">● Live Demo</span>
-    <span style="color:#786D79;font-size:0.68rem;letter-spacing:0.3px;">🕐 Last updated: {_last_date or _now}</span>
-    <span style="color:#8B858E;font-size:0.65rem;letter-spacing:0.2px;">👤 {_last_author}</span>
+    <span style="color:#786D79;font-size:0.68rem;letter-spacing:0.3px;">🕐 Last updated by: <b style="color:#411260;">{_last_author}</b> · {_last_datetime}</span>
   </div>
 </div>
 """, unsafe_allow_html=True)
