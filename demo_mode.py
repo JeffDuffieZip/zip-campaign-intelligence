@@ -157,11 +157,24 @@ def _scenario_post_campaign() -> Generator[dict, None, None]:
         cann=c.get("CANNIBALIZATION_RATE"), stage="post",
     )
 
+    similar = find_similar_campaigns(c, k=3, min_score=5)
+    toc_items = [
+        "1 · 📊 Final A/B Results",
+        "2 · 💎 What's Actually Incremental",
+        "3 · 📌 Recommendation",
+        "4 · 🔁 Historical Analogs" if similar else None,
+    ]
+    toc_line = " · ".join(x for x in toc_items if x)
+
     narrative = (
-        f"**App Deals — July 4th: Statistically Significant. SCALE.**\n\n"
-        f"This is a clean, defensible win.\n\n"
+        f"## ✅ App Deals — July 4th: Statistically Significant. SCALE.\n\n"
+        f"*This is a clean, defensible win.*\n\n"
+        f"📑 **What's in this report:** {toc_line}\n\n"
+        f"---\n\n"
+        f"### 1 · 📊 Final A/B Results\n\n"
         f"{results_table}"
-        f"**What's Actually Incremental**\n"
+        f"---\n\n"
+        f"### 2 · 💎 What's Actually Incremental\n\n"
         f"Raw conversions in the target arm: **{int(c['CVR_TARGET']*c['TARGET_AUDIENCE']):,}**. "
         f"But only **{c['iCustomers']:,} of those were truly incremental** — the rest would have "
         f"purchased anyway. This is the gap most campaign reports miss.\n\n"
@@ -169,29 +182,22 @@ def _scenario_post_campaign() -> Generator[dict, None, None]:
         f"- Incremental TTV: **+${c['iTTV']:,.0f}**\n"
         f"- Cannibalization rate: **{c['CANNIBALIZATION_RATE']*100:.1f}%** "
         f"— high, but expected for a holiday push to an already-engaged App Deals segment\n\n"
-        f"**What's Actually Incremental**\n"
-        f"Raw conversions in the target arm: **{int(c['CVR_TARGET']*c['TARGET_AUDIENCE']):,}**. "
-        f"But only **{c['iCustomers']:,} of those were truly incremental** — the rest would have "
-        f"purchased anyway. This is the gap most campaign reports miss.\n\n"
-        f"- Incremental customers: **+{c['iCustomers']:,}**\n"
-        f"- Incremental TTV: **+${c['iTTV']:,.0f}**\n"
-        f"- Cannibalization rate: **{c['CANNIBALIZATION_RATE']*100:.1f}%** "
-        f"— high, but expected for a holiday push to an already-engaged App Deals segment\n\n"
-        f"**Recommendation: SCALE**\n"
+        f"---\n\n"
+        f"### 3 · 📌 Recommendation — SCALE\n\n"
         f"The lift is real at 99% confidence and the incremental revenue is positive. "
         f"Rebuild this exact creative + audience + send-time recipe for Memorial Day, Labor Day, "
         f"and BFCM. We have a holiday playbook here — let's productionize it."
     )
 
-    # Append similar-campaign evidence
-    similar = find_similar_campaigns(c, k=3, min_score=5)
     if similar:
         top = similar[0]
         narrative += (
-            f"\n\n**🔁 Closest analog:** *{top['name']}* "
+            f"\n\n---\n\n"
+            f"### 4 · 🔁 Historical Analogs\n\n"
+            f"**Closest analog:** *{top['name']}* "
             f"(Canvas ID `{top['canvas_id'][:8]}…` · "
             f"iTTV ${(top['campaign'].get('iTTV') or 0):+,.0f}). "
-            f"This pairing gives you two completed wins to build the holiday playbook around."
+            f"This pairing gives you two completed wins to build the holiday playbook around.\n"
         )
         narrative += similar_summary_markdown(similar)
 
@@ -230,38 +236,51 @@ def _scenario_during_campaign() -> Generator[dict, None, None]:
         days_running=14, stage="during",
     )
 
+    similar = find_similar_campaigns(c, k=3, min_score=5)
+    toc_items = [
+        "1 · 📊 Mid-flight A/B Results",
+        "2 · ⚠️ What Would It Take?",
+        "3 · 📌 Recommendation",
+        "4 · 🔁 Where Redirecting Could Land" if similar else None,
+    ]
+    toc_line = " · ".join(x for x in toc_items if x)
+
     narrative = (
-        f"**App Deals — Jan 2025 Email: Not Significant. STOP.**\n\n"
-        f"This campaign is not going to get there. Here's the math.\n\n"
+        f"## 🛑 App Deals — Jan 2025 Email: Not Significant. STOP.\n\n"
+        f"*This campaign is not going to get there. Here's the math.*\n\n"
+        f"📑 **What's in this report:** {toc_line}\n\n"
+        f"---\n\n"
+        f"### 1 · 📊 Mid-flight A/B Results\n\n"
         f"{results_table}"
         f"T-statistic of **{stat['t_statistic']:.3f}** — needs **1.96** for 95% confidence. "
         f"We're nowhere close.\n\n"
-        f"**What Would It Take?**\n"
+        f"---\n\n"
+        f"### 2 · ⚠️ What Would It Take?\n\n"
         f"At the current effect size, we'd need an **additional 4.2M users** in the test — "
         f"a 14× scale-up — to ever reach significance. That means **~608 more days** "
         f"at the current daily entry rate.\n\n"
-        f"This isn't an under-powered test. The lift just isn't there.\n\n"
-        f"**Recommendation: STOP**\n"
-        f"Three options ranked by ROI:\n"
+        f"This isn't an under-powered test. **The lift just isn't there.**\n\n"
+        f"---\n\n"
+        f"### 3 · 📌 Recommendation — STOP\n\n"
+        f"Three options ranked by ROI:\n\n"
         f"1. **Kill the test now.** Redirect the audience to a higher-lift creative.\n"
         f"2. Test a meaningfully different creative angle — promo depth, urgency, or audience cut.\n"
         f"3. Accept that the App Deals segment is already converting near its ceiling — the "
         f"baseline of 7.7% is at the 95th percentile across our portfolio.\n\n"
-        f"Opportunity cost of leaving this running for the planned 30 days: **~$45K in iTTV** "
+        f"**Opportunity cost** of leaving this running for the planned 30 days: **~$45K in iTTV** "
         f"we could have generated by routing this audience to a winning concept."
     )
 
-    # Show what 'good' could have looked like via similar campaigns
-    similar = find_similar_campaigns(c, k=3, min_score=5)
     if similar:
         winners = [m for m in similar if (m["campaign"].get("iTTV") or 0) > 0]
+        narrative += f"\n\n---\n\n### 4 · 🔁 Where Redirecting Could Land\n\n"
         if winners:
             top = winners[0]
             narrative += (
-                f"\n\n**🔁 Where redirecting could land:** *{top['name']}* "
+                f"**Strongest alternative:** *{top['name']}* "
                 f"(Canvas ID `{top['canvas_id'][:8]}…` · iTTV "
                 f"**${(top['campaign'].get('iTTV') or 0):+,.0f}**) ran on a comparable audience and won. "
-                f"Routing the same volume to that recipe is the high-confidence next move."
+                f"Routing the same volume to that recipe is the high-confidence next move.\n"
             )
         narrative += similar_summary_markdown(similar)
 
@@ -306,7 +325,7 @@ def _scenario_pre_campaign() -> Generator[dict, None, None]:
                          sizing)
 
     sizing_table = (
-        f"#### Pre-Launch Sizing — Best Buy New Purchasers\n\n"
+        f"### 1 · 📊 Sizing Snapshot\n\n"
         f"| | CVR | Users per group (N/Arm) | Total N | Pool Coverage | Days to Sig |\n"
         f"|---|---|---|---|---|---|\n"
         f"| **Baseline (control)** | {baseline*100:.2f}% | — | — | — | — |\n"
@@ -318,31 +337,6 @@ def _scenario_pre_campaign() -> Generator[dict, None, None]:
         f"**+${sizing['expected_i_ttv']:,}** | 200,000 | 🟢 YES — DO IT |\n\n"
     )
 
-    narrative = (
-        f"**Best Buy — New Purchasers V3: Pre-Launch Sizing**\n\n"
-        f"Here's what you need to know before greenlighting this test.\n\n"
-        f"{sizing_table}"
-        f"**Segment Baseline**\n"
-        f"Across 6 prior Best Buy New Purchaser campaigns, our historical baseline CVR is "
-        f"**{baseline*100:.2f}%**. This is a hard-to-convert segment — customers who've never "
-        f"transacted with Zip — so don't anchor on App Deals' 9% CVR.\n\n"
-        f"**Projected Outcome (if hypothesis holds)**\n"
-        f"- Expected incremental customers: **+{sizing['expected_i_customers']:,}**\n"
-        f"- Expected incremental TTV: **+${sizing['expected_i_ttv']:,}** "
-        f"(at our $163 average TTV per converted Best Buy New customer)\n\n"
-        f"**Three Things to Check Before Launch**\n"
-        f"1. **Power**: 200K eligible is comfortable. We'll use ~70% of the pool, leaving "
-        f"~60K for a v4 holdout if needed.\n"
-        f"2. **Practical floor**: If we see less than +0.10 pp absolute lift in week 1, "
-        f"the test is dead — stop early.\n"
-        f"3. **Confounders**: Run during a non-promotional window. Avoid overlap with the "
-        f"BFCM cycle which has its own audience pull.\n\n"
-        f"🟢 **Recommendation: YES — DO IT**\n"
-        f"The test is well-powered, the projected return justifies the spend, and we have "
-        f"a clean read window. Launch when ready."
-    )
-
-    # Find similar historical Best Buy New campaigns for evidence
     pseudo_target = {
         "segment": "Best_Buy_New",
         "partner": "Best_Buy",
@@ -353,15 +347,59 @@ def _scenario_pre_campaign() -> Generator[dict, None, None]:
         "CAMPAIGN_CANVAS_ID": "planned-best-buy-v3",
     }
     similar = find_similar_campaigns(pseudo_target, k=3, min_score=5)
+
+    toc_items = [
+        "1 · 📊 Sizing Snapshot",
+        "2 · 🌱 Segment Baseline",
+        "3 · 💡 Projected Outcome",
+        "4 · ✅ Pre-Launch Checklist",
+        "5 · 📌 Recommendation",
+        "6 · 🔁 Historical Analogs" if similar else None,
+    ]
+    toc_line = " · ".join(x for x in toc_items if x)
+
+    narrative = (
+        f"## 📋 Best Buy — New Purchasers V3: Pre-Launch Sizing\n\n"
+        f"*Segment: Best Buy New · Population: 200,000 · Lift hypothesis: +15% · "
+        f"Two-sided · 95% CI*\n\n"
+        f"📑 **What's in this report:** {toc_line}\n\n"
+        f"---\n\n"
+        f"{sizing_table}"
+        f"---\n\n"
+        f"### 2 · 🌱 Segment Baseline\n\n"
+        f"Across **6 prior Best Buy New Purchaser campaigns**, our historical baseline CVR is "
+        f"**{baseline*100:.2f}%**. This is a hard-to-convert segment — customers who've never "
+        f"transacted with Zip — so don't anchor on App Deals' 9% CVR.\n\n"
+        f"---\n\n"
+        f"### 3 · 💡 Projected Outcome (if hypothesis holds)\n\n"
+        f"- Expected incremental customers: **+{sizing['expected_i_customers']:,}**\n"
+        f"- Expected incremental TTV: **+${sizing['expected_i_ttv']:,}** "
+        f"(at our $163 average TTV per converted Best Buy New customer)\n\n"
+        f"---\n\n"
+        f"### 4 · ✅ Pre-Launch Checklist\n\n"
+        f"1. **Power**: 200K eligible is comfortable. We'll use ~70% of the pool, leaving "
+        f"~60K for a v4 holdout if needed.\n"
+        f"2. **Practical floor**: If we see less than +0.10 pp absolute lift in week 1, "
+        f"the test is dead — stop early.\n"
+        f"3. **Confounders**: Run during a non-promotional window. Avoid overlap with the "
+        f"BFCM cycle which has its own audience pull.\n\n"
+        f"---\n\n"
+        f"### 5 · 📌 Recommendation — 🟢 YES — DO IT\n\n"
+        f"The test is well-powered, the projected return justifies the spend, and we have "
+        f"a clean read window. Launch when ready."
+    )
+
     if similar:
         top = similar[0]
         top_ttv = top["campaign"].get("iTTV") or 0
         narrative += (
-            f"\n\n**🔁 Best historical analog:** *{top['name']}* "
+            f"\n\n---\n\n"
+            f"### 6 · 🔁 Historical Analogs\n\n"
+            f"**Best historical analog:** *{top['name']}* "
             f"(Canvas ID `{top['canvas_id'][:8]}…`). "
             f"That campaign landed at {(top['campaign'].get('CVR_TARGET') or 0)*100:.2f}% CVR — "
             f"if V3 lands there, expect **${top_ttv:+,.0f}** iTTV. "
-            f"This is your confidence band, not a guarantee — but it's evidence the segment responds."
+            f"This is your confidence band, not a guarantee — but it's evidence the segment responds.\n"
         )
         narrative += similar_summary_markdown(similar, header="Recent Best Buy New campaigns")
 
