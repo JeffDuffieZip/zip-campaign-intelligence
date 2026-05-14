@@ -980,6 +980,69 @@ def render_executive_report():
     steps_html += "</ol></div>"
     st.markdown(steps_html, unsafe_allow_html=True)
 
+    # ── Section 5: Stakeholder explainer ─────────────────────────────────────
+    with st.expander("📖  How to read this report — plain-language guide for stakeholders", expanded=False):
+        st.markdown(f"""
+<div style="font-size:0.84rem;color:#1A0725;line-height:1.7;">
+
+### What are we actually measuring?
+
+Every campaign we run is split into two groups: a **Target (treatment) arm** that receives the
+offer, and a **Control arm** that doesn't. The difference in conversion rate between those two
+groups is the raw signal we analyse.
+
+The challenge is simple: **was the difference real, or just random chance?** The metrics below
+answer that question.
+
+---
+
+### 🔢 The key numbers — what they mean
+
+| Metric | Plain-language meaning | What to look for |
+|---|---|---|
+| **T-Statistic** | A score that measures how "loud" the signal is compared to random noise. Think of it like a signal-to-noise ratio. | **\|t\| > 1.96** = 95% sure the effect is real. The current result is **t = {f"{t_stat:.3f}" if t_stat is not None else "—"}**. |
+| **Confidence Level** | How certain we are that the lift is real and not a fluke. | **95%+** is our call threshold. **99%** means we're very confident. Current: **{confidence or "sizing mode"}**. |
+| **iCustomers** | Incremental customers — the number of people who *only converted because of our campaign*. Not every conversion counts; customers who would have purchased anyway are excluded. | Higher is better. Current result: **{ic_str}**. |
+| **Incremental TTV** | The extra transaction value *created by the campaign* after subtracting what would have happened organically. | Higher is better. Current: **{ittv_str}**. |
+| **Cannibalization Rate** | The % of conversions in the target arm that would have happened *without* the campaign. A 46% cannibalization rate means 54% of conversions were genuinely new. | **Below 40%** is healthy. **Above 60%** means the campaign is mostly taking credit for organic behaviour. Current: **{f"{cann*100:.1f}%" if cann is not None else "—"}**. |
+| **ROI %** | Return on the incentive spend. A 424% ROI means for every $10 we spend on incentives, we get $52.43 in gross revenue back — or $42.43 net. | Anything **above 100%** is profitable. Zip's fixed unit economics give us **{actual_roi:.0f}% ROI** per incremental conversion at current AOV and margins. |
+
+---
+
+### 🚦 What do the traffic lights mean?
+
+| Light | Meaning |
+|---|---|
+| 🟢 **Green** | The metric is tracking well — at or above the target threshold. Good news for stakeholders. |
+| 🟡 **Amber** | The metric is borderline, the campaign is in sizing mode, or we don't have enough data yet. Monitor and revisit. |
+| 🔴 **Red** | The metric is below threshold or the result is not statistically significant. Action is needed before investing further. |
+
+---
+
+### 📋 What do the recommendations mean?
+
+| Recommendation | What it means for budget & planning |
+|---|---|
+| 🟢 **SCALE** | Results are statistically confirmed. Expand audience and budget — the recipe works. |
+| 🟢 **GREENLIGHT** | The test design is solid. Approve launch — the sample size and timeline are well-powered. |
+| 🟡 **EXTEND** | Signal is directionally positive but not yet significant. Run longer before deciding. |
+| 🟡 **ITERATE** | The idea has merit but execution needs adjustment. Redesign the offer or audience before scaling. |
+| 🟡 **WATCH** | Too early to call. No action — check back in 7 days. |
+| 🔴 **RETHINK** | The campaign underperformed control. Pause investment; revisit the hypothesis. |
+| 🔴 **STOP** | The lift isn't there and more time won't fix it. Cut losses and reallocate to winning campaigns. |
+
+---
+
+### 💡 Why does this matter to Zip Co?
+
+Every dollar we spend on campaign incentives competes with other growth investments. This
+framework ensures we only **scale campaigns that are provably incremental** — not ones that
+look good on a dashboard but are really just crediting conversions that were going to happen
+anyway. The iCustomers and cannibalization metrics are what separate a real win from a
+vanity metric.
+
+</div>""", unsafe_allow_html=True)
+
     # ── Footer ────────────────────────────────────────────────────────────────
     st.markdown(f"""
     <div style="margin-top:18px;padding:12px 16px;border-top:1px solid #E1E0DF;
