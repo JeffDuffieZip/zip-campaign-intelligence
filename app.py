@@ -1062,18 +1062,31 @@ vanity metric.
 
 _now = datetime.now().strftime("%d %b %Y · %H:%M")
 try:
+    _git_cwd = os.path.dirname(os.path.abspath(__file__))
     _last_author = subprocess.check_output(
         ["git", "log", "-1", "--pretty=format:%an"],
-        cwd=os.path.dirname(os.path.abspath(__file__)),
-        stderr=subprocess.DEVNULL,
+        cwd=_git_cwd, stderr=subprocess.DEVNULL,
     ).decode().strip() or "—"
     _last_datetime = subprocess.check_output(
         ["git", "log", "-1", "--pretty=format:%ad", "--date=format:%d %b %Y · %H:%M"],
-        cwd=os.path.dirname(os.path.abspath(__file__)),
-        stderr=subprocess.DEVNULL,
+        cwd=_git_cwd, stderr=subprocess.DEVNULL,
     ).decode().strip() or _now
+    _changed_raw = subprocess.check_output(
+        ["git", "diff-tree", "--no-commit-id", "-r", "--name-only", "HEAD"],
+        cwd=_git_cwd, stderr=subprocess.DEVNULL,
+    ).decode().strip()
+    _files = [f.split("/")[-1] for f in _changed_raw.splitlines() if f.strip()]
+    if len(_files) > 3:
+        _last_files = ", ".join(_files[:3]) + f" +{len(_files) - 3} more"
+    else:
+        _last_files = ", ".join(_files) if _files else ""
 except Exception:
-    _last_author, _last_datetime = "—", _now
+    _last_author, _last_datetime, _last_files = "—", _now, ""
+
+_files_line = (
+    f' · <span style="color:#786D79;">updated: <b style="color:#411260;">{_last_files}</b></span>'
+    if _last_files else ""
+)
 st.markdown(f"""
 <div class="zip-header">
   <div class="zip-logo-wrap">
@@ -1088,7 +1101,7 @@ st.markdown(f"""
   </div>
   <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
     <span class="zip-badge">● Live Demo</span>
-    <span style="color:#786D79;font-size:0.68rem;letter-spacing:0.3px;">🕐 Last updated by: <b style="color:#411260;">{_last_author}</b> · {_last_datetime}</span>
+    <span style="color:#786D79;font-size:0.68rem;letter-spacing:0.3px;">🕐 Last updated by: <b style="color:#411260;">{_last_author}</b> · {_last_datetime}{_files_line}</span>
   </div>
 </div>
 """, unsafe_allow_html=True)
