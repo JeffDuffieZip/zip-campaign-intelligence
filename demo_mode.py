@@ -466,7 +466,7 @@ def _handle_custom_sizing(
 
     hyp_label  = f"{'One' if one_sided else 'Two'}-sided · {confidence_pct}% CI"
     sizing_table = (
-        f"#### Pre-Launch Sizing — {name_str}\n\n"
+        f"### 1 · 📊 Sizing Snapshot\n\n"
         f"| | CVR | Users per group (N/Arm) | Total N | Pool Coverage | Days to Sig |\n"
         f"|---|---|---|---|---|---|\n"
         f"| **Baseline (control)** | {p_c * 100:.2f}% | — | — | — | — |\n"
@@ -521,8 +521,9 @@ def _handle_custom_sizing(
             )
 
         reality_block = (
-            f"#### {reality_emoji} Reality Check — Historical lifts in "
-            f"{segment.replace('_', ' ')} ({len(lifts_sorted)} past campaigns)\n\n"
+            f"### 2 · {reality_emoji} Reality Check\n\n"
+            f"Historical lifts across **{len(lifts_sorted)} past {segment.replace('_', ' ')} "
+            f"campaigns**:\n\n"
             f"| | Min | Median | Max | Your target |\n"
             f"|---|---|---|---|---|\n"
             f"| Relative lift | {L_min:+.1f}% | {L_med:+.1f}% | {L_max:+.1f}% | "
@@ -575,7 +576,9 @@ def _handle_custom_sizing(
             f"{s['pool']:.0f}% | +{s['ic']:,} | +${s['ittv']:,} | {s['verdict']} |\n"
         )
     scenario_block = (
-        f"#### 🎯 Scenario Matrix — what if the lift is different?\n\n"
+        f"### 4 · 🔀 Scenario Matrix\n\n"
+        f"What if the lift comes in different than you expect? Here's how three "
+        f"hypotheses compare:\n\n"
         f"| Scenario | Lift | N/Arm | Days | Pool | iCustomers | iTTV | Verdict |\n"
         f"|---|---|---|---|---|---|---|---|\n"
         f"{scenario_rows}\n"
@@ -613,31 +616,7 @@ def _handle_custom_sizing(
         else "exceeds pool 🔴"
     )
 
-    narrative = (
-        f"**{name_str} — Custom Campaign Sizing**\n\n"
-        f"Here's your sizing analysis for the {segment.replace('_', ' ')} segment.\n\n"
-        f"{sizing_table}"
-        f"{reality_block}"
-        f"**Segment Baseline**\n"
-        f"{seg_context}\n\n"
-        f"**Projected Outcome (if hypothesis holds)**\n"
-        f"- Expected incremental customers: **+{i_customers:,}**\n"
-        f"- Expected incremental TTV: **+${i_ttv:,}** (at ${aov:.2f} avg TTV per conversion)\n"
-        f"- Pool usage: **{pool_pct:.0f}%** of {pop:,} eligible ({pool_emoji})\n\n"
-        f"{scenario_block}"
-        f"**Test Design Checklist**\n"
-        f"1. **Hypothesis**: {hypothesis} test at {confidence_pct}% confidence "
-        f"(z = {z_a:.3f}) — "
-        + ("directional, requires smaller sample" if one_sided
-           else "tests both directions, industry standard") + "\n"
-        f"2. **Power**: {n_req:,} users per arm ({n_req * 2:,} total) — {arm_health}\n"
-        f"3. **Speed**: ~{days_to_sig} days to significance at {int(daily_entry):,} daily entries\n"
-        f"4. **Practical floor**: Stop early if absolute lift < +{(p_t - p_c) / 2 * 100:.2f} pp in week 1\n"
-        f"5. **Confounders**: Avoid promotional overlap windows; ensure clean holdout\n\n"
-        f"{rec} — {rec_note}"
-    )
-
-    # Historical analogues
+    # Historical analogues (computed up front so the TOC can mention section 7)
     pseudo_target = {
         "segment": segment,
         "TARGET_AUDIENCE": pop,
@@ -645,16 +624,67 @@ def _handle_custom_sizing(
         "CAMPAIGN_CANVAS_ID": "planned-custom",
     }
     similar = find_similar_campaigns(pseudo_target, k=3, min_score=4)
+
+    toc_items = [
+        "1 · 📊 Sizing Snapshot",
+        "2 · 🔍 Reality Check" if historical_lifts else None,
+        "3 · 🌱 Segment Context & Projected Outcome",
+        "4 · 🔀 Scenario Matrix",
+        "5 · ✅ Test Design Checklist",
+        "6 · 📌 Recommendation",
+        "7 · 🔁 Historical Analogs" if similar else None,
+    ]
+    toc_line = " · ".join(x for x in toc_items if x)
+
+    hypothesis_explainer = (
+        "directional, requires smaller sample"
+        if one_sided else "tests both directions, industry standard"
+    )
+
+    narrative = (
+        f"## 🆕 {name_str} — Custom Campaign Sizing\n\n"
+        f"*Segment: {segment.replace('_', ' ')} · Population: {pop:,} · "
+        f"Lift hypothesis: +{lift_pct:.0f}% · {hyp_label}*\n\n"
+        f"📑 **What's in this report:** {toc_line}\n\n"
+        f"---\n\n"
+        f"{sizing_table}"
+        f"---\n\n"
+        f"{reality_block}"
+        + ("---\n\n" if reality_block else "")
+        +
+        f"### 3 · 🌱 Segment Context & Projected Outcome\n\n"
+        f"**Segment baseline.** {seg_context}\n\n"
+        f"**Projected outcome (if hypothesis holds):**\n"
+        f"- Expected incremental customers: **+{i_customers:,}**\n"
+        f"- Expected incremental TTV: **+${i_ttv:,}** (at ${aov:.2f} avg TTV per conversion)\n"
+        f"- Pool usage: **{pool_pct:.0f}%** of {pop:,} eligible ({pool_emoji})\n\n"
+        f"---\n\n"
+        f"{scenario_block}"
+        f"---\n\n"
+        f"### 5 · ✅ Test Design Checklist\n\n"
+        f"1. **Hypothesis**: {hypothesis} test at {confidence_pct}% confidence "
+        f"(z = {z_a:.3f}) — {hypothesis_explainer}\n"
+        f"2. **Power**: {n_req:,} users per arm ({n_req * 2:,} total) — {arm_health}\n"
+        f"3. **Speed**: ~{days_to_sig} days to significance at {int(daily_entry):,} daily entries\n"
+        f"4. **Practical floor**: Stop early if absolute lift < +{(p_t - p_c) / 2 * 100:.2f} pp in week 1\n"
+        f"5. **Confounders**: Avoid promotional overlap windows; ensure clean holdout\n\n"
+        f"---\n\n"
+        f"### 6 · 📌 Recommendation\n\n"
+        f"{rec} — {rec_note}"
+    )
+
     if similar:
         top = similar[0]
         top_ttv = top["campaign"].get("iTTV") or 0
         top_cvr = top["campaign"].get("CVR_TARGET") or 0
         narrative += (
-            f"\n\n**🔁 Best historical analog:** *{top['name']}* "
+            f"\n\n---\n\n"
+            f"### 7 · 🔁 Historical Analogs\n\n"
+            f"**Best historical analog:** *{top['name']}* "
             f"(Canvas ID `{top['canvas_id'][:8]}…`). "
             f"That campaign landed at {top_cvr * 100:.2f}% CVR"
             + (f" — if {name_str} lands there, expect **${top_ttv:+,.0f}** iTTV" if top_ttv else "")
-            + ". This is your confidence band, not a guarantee — but it's evidence the segment responds."
+            + ". This is your confidence band, not a guarantee — but it's evidence the segment responds.\n"
         )
         narrative += similar_summary_markdown(
             similar, header=f"Historical {segment.replace('_', ' ')} campaigns"
