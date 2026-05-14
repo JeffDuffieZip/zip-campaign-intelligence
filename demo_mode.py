@@ -307,7 +307,7 @@ def _scenario_pre_campaign() -> Generator[dict, None, None]:
 
     sizing_table = (
         f"#### Pre-Launch Sizing — Best Buy New Purchasers\n\n"
-        f"| | CVR | N / Arm | Total N | Pool Coverage | Days to Sig |\n"
+        f"| | CVR | Users per group (N/Arm) | Total N | Pool Coverage | Days to Sig |\n"
         f"|---|---|---|---|---|---|\n"
         f"| **Baseline (control)** | {baseline*100:.2f}% | — | — | — | — |\n"
         f"| **Target (+15% lift)** | **{p_t*100:.2f}%** | **{n_req:,}** | "
@@ -460,7 +460,7 @@ def _handle_custom_sizing(
 
     sizing_table = (
         f"#### Pre-Launch Sizing — {name_str}\n\n"
-        f"| | CVR | N / Arm | Total N | Pool Coverage | Days to Sig |\n"
+        f"| | CVR | Users per group (N/Arm) | Total N | Pool Coverage | Days to Sig |\n"
         f"|---|---|---|---|---|---|\n"
         f"| **Baseline (control)** | {p_c * 100:.2f}% | — | — | — | — |\n"
         f"| **Target (+{lift_pct:.0f}% lift)** | **{p_t * 100:.2f}%** | **{n_req:,}** | "
