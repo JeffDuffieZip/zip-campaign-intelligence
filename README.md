@@ -52,7 +52,7 @@ Then open [http://localhost:8501](http://localhost:8501).
 
 **Pre-campaign dual sub-section:**
 - **📋 Best Buy Demo** — hard-coded Best Buy New Purchasers sizing (200K pool, 15% lift hypothesis)
-- **🆕 Size a New Campaign** — interactive form: pick a segment, set population + lift target, get a dynamic sizing analysis with GREENLIGHT / WATCH / RETHINK recommendation
+- **🆕 Size a New Campaign** — interactive form: pick a segment, set population + lift target, get a dynamic sizing analysis with a plain-English recommendation: **🟢 YES — DO IT** / **🟡 DOABLE** / **🔴 RETHINK**
 
 ### 📋 Executive Report tab
 
@@ -76,6 +76,18 @@ Auto-generated from the last campaign analysis. Includes:
 | **Users per group (N/Arm)** | Minimum users needed in *each* arm (control and target) to detect the expected lift. Total N = 2 × N/Arm. |
 | **Days to Sig** | Estimated days to reach statistical significance at the current daily entry rate. |
 | **ROI** | Fixed at 424.3% based on Zip unit economics: AOV $126.50 × NTM 41.44% ÷ $10 incentive − 1. |
+
+---
+
+## Recommendation labels (plain English)
+
+The sizer always ends with one of three verdicts:
+
+| Verdict | What it means | When you'd see it |
+|---|---|---|
+| 🟢 **YES — DO IT** | Test design is solid. Sample size is feasible and read window is reasonable. **Launch it.** | Healthy pool coverage (≤80%), ≤30 days to significance |
+| 🟡 **DOABLE** | The math works, but with caveats — either the pool is tight or the read window is long. Launch only if you don't have a faster alternative. | Pool 80–100% OR 30–60 days to significance |
+| 🔴 **RETHINK** | The current setup won't get you to a clean read. Broaden the audience, lower the confidence bar, or target a higher-lift segment. | Pool >100% OR read window >60 days |
 
 ---
 

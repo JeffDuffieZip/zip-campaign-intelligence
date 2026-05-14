@@ -315,7 +315,7 @@ def _scenario_pre_campaign() -> Generator[dict, None, None]:
         f"| Expected iCustomers | Expected iTTV | Eligible Pool | Recommendation |\n"
         f"|---|---|---|---|\n"
         f"| **+{sizing['expected_i_customers']:,}** | "
-        f"**+${sizing['expected_i_ttv']:,}** | 200,000 | 🟢 GREENLIGHT |\n\n"
+        f"**+${sizing['expected_i_ttv']:,}** | 200,000 | 🟢 YES — DO IT |\n\n"
     )
 
     narrative = (
@@ -337,7 +337,7 @@ def _scenario_pre_campaign() -> Generator[dict, None, None]:
         f"the test is dead — stop early.\n"
         f"3. **Confounders**: Run during a non-promotional window. Avoid overlap with the "
         f"BFCM cycle which has its own audience pull.\n\n"
-        f"🟢 **Recommendation: GREENLIGHT**\n"
+        f"🟢 **Recommendation: YES — DO IT**\n"
         f"The test is well-powered, the projected return justifies the spend, and we have "
         f"a clean read window. Launch when ready."
     )
@@ -420,14 +420,14 @@ def _handle_custom_sizing(
             f"audience or accepting a lower confidence level."
         )
     elif days_to_sig > 60:
-        rec = "🟡 WATCH"
+        rec = "🟡 DOABLE"
         rec_note = (
             f"**Slow test.** At {int(daily_entry):,} daily entries it'll take ~{days_to_sig} "
             f"days to reach significance. Consider increasing the eligible pool or targeting "
             f"a higher-lift segment."
         )
     else:
-        rec = "🟢 GREENLIGHT"
+        rec = "🟢 YES — DO IT"
         rec_note = (
             f"**Well-powered.** {pool_pct:.0f}% pool coverage, ~{days_to_sig} days to "
             f"significance. The projected return justifies the spend — launch when ready."
@@ -549,9 +549,9 @@ def _handle_custom_sizing(
         elif days_x > 60:
             v = "🟡 Slow read"
         elif days_x <= 30 and pool_x <= 80:
-            v = "🟢 GREENLIGHT"
+            v = "🟢 YES — DO IT"
         else:
-            v = "🟡 WATCH"
+            v = "🟡 DOABLE"
         return {"lift": lift, "n": n_x, "days": days_x, "pool": pool_x,
                 "ic": ic_x, "ittv": ittv_x, "verdict": v}
 

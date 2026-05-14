@@ -1026,9 +1026,10 @@ answer that question.
 | Recommendation | What it means for budget & planning |
 |---|---|
 | 🟢 **SCALE** | Results are statistically confirmed. Expand audience and budget — the recipe works. |
-| 🟢 **GREENLIGHT** | The test design is solid. Approve launch — the sample size and timeline are well-powered. |
+| 🟢 **YES — DO IT** | The test design is solid. Approve launch — the sample size and timeline are well-powered. |
 | 🟡 **EXTEND** | Signal is directionally positive but not yet significant. Run longer before deciding. |
 | 🟡 **ITERATE** | The idea has merit but execution needs adjustment. Redesign the offer or audience before scaling. |
+| 🟡 **DOABLE** | It can be done, but pool is tight or read window is long. Launch only if you have no faster alternative. |
 | 🟡 **WATCH** | Too early to call. No action — check back in 7 days. |
 | 🔴 **RETHINK** | The campaign underperformed control. Pause investment; revisit the hypothesis. |
 | 🔴 **STOP** | The lift isn't there and more time won't fix it. Cut losses and reallocate to winning campaigns. |
