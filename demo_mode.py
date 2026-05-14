@@ -477,6 +477,113 @@ def _handle_custom_sizing(
         f"| **+{i_customers:,}** | **+${i_ttv:,}** | {pop:,} | {hyp_label} | {rec} |\n\n"
     )
 
+    # ── Reality Check: compare requested lift to historical lifts in this segment ──
+    seg_campaigns = [
+        c for c in CAMPAIGNS
+        if c.get("segment") == segment
+        and c.get("CVR_CONTROL") and c.get("CVR_TARGET")
+        and (c.get("STATUS") or "completed").lower() == "completed"
+    ]
+    historical_lifts = []
+    for c in seg_campaigns:
+        p_t_h, p_c_h = c["CVR_TARGET"], c["CVR_CONTROL"]
+        if p_c_h > 0:
+            historical_lifts.append((p_t_h - p_c_h) / p_c_h * 100)
+
+    reality_block = ""
+    if historical_lifts:
+        lifts_sorted = sorted(historical_lifts)
+        L_min = lifts_sorted[0]
+        L_max = lifts_sorted[-1]
+        L_med = lifts_sorted[len(lifts_sorted) // 2]
+        below = sum(1 for L in lifts_sorted if L < lift_pct)
+        pctile = round(below / len(lifts_sorted) * 100)
+
+        if lift_pct > L_max:
+            reality_emoji = "🚨"
+            reality_verdict = (
+                f"**Your {lift_pct:.0f}% target exceeds the historical max of "
+                f"{L_max:+.1f}%** in this segment. Possible, but ambitious — "
+                f"consider **{max(round(L_med), 5):.0f}%** (the median) as a backup hypothesis."
+            )
+        elif pctile >= 75:
+            reality_emoji = "⚠️"
+            reality_verdict = (
+                f"Your {lift_pct:.0f}% target is at the **{pctile}th percentile** of "
+                f"historical results in this segment. Possible — but plan for a slower read "
+                f"and have a fallback hypothesis ready."
+            )
+        else:
+            reality_emoji = "✅"
+            reality_verdict = (
+                f"Your {lift_pct:.0f}% target is well within the historical range "
+                f"({pctile}th percentile). **Realistic hypothesis.**"
+            )
+
+        reality_block = (
+            f"#### {reality_emoji} Reality Check — Historical lifts in "
+            f"{segment.replace('_', ' ')} ({len(lifts_sorted)} past campaigns)\n\n"
+            f"| | Min | Median | Max | Your target |\n"
+            f"|---|---|---|---|---|\n"
+            f"| Relative lift | {L_min:+.1f}% | {L_med:+.1f}% | {L_max:+.1f}% | "
+            f"**{lift_pct:+.1f}%** ({pctile}th %ile) |\n\n"
+            f"> {reality_verdict}\n\n"
+        )
+
+    # ── Scenario Matrix: 3 lift hypotheses side-by-side ──
+    def _size_one(lift: float) -> dict:
+        p2 = round(p_c * (1 + lift / 100), 6)
+        if p2 <= p_c:
+            return {"lift": lift, "n": 0, "days": 0, "pool": 0,
+                    "ic": 0, "ittv": 0, "verdict": "🔴 No lift"}
+        p_avg_x = (p_c + p2) / 2
+        num_x = (z_a * math.sqrt(2 * p_avg_x * (1 - p_avg_x))
+                 + z_b * math.sqrt(p_c * (1 - p_c) + p2 * (1 - p2))) ** 2
+        n_x = math.ceil(num_x / (p2 - p_c) ** 2)
+        days_x = max(1, math.ceil((n_x * 2) / daily_entry))
+        pool_x = round((n_x * 2) / pop * 100, 1)
+        ic_x = int((p2 - p_c) * n_x)
+        ittv_x = int(ic_x * aov)
+        if pool_x > 100:
+            v = "🔴 Pool too small"
+        elif days_x > 60:
+            v = "🟡 Slow read"
+        elif days_x <= 30 and pool_x <= 80:
+            v = "🟢 GREENLIGHT"
+        else:
+            v = "🟡 WATCH"
+        return {"lift": lift, "n": n_x, "days": days_x, "pool": pool_x,
+                "ic": ic_x, "ittv": ittv_x, "verdict": v}
+
+    cons_lift    = max(3, round(lift_pct * 0.33))
+    stretch_lift = min(40, round(lift_pct * 1.67))
+    # If the three lifts collide (e.g. user picks 5%), spread them out
+    if cons_lift >= lift_pct:
+        cons_lift = max(3, int(lift_pct) - 5)
+    if stretch_lift <= lift_pct:
+        stretch_lift = int(lift_pct) + 10
+
+    scenarios = [
+        ("🟢 Conservative", cons_lift,       _size_one(cons_lift)),
+        ("🔵 Target (yours)", lift_pct,      _size_one(lift_pct)),
+        ("🚀 Stretch",       stretch_lift,   _size_one(stretch_lift)),
+    ]
+    scenario_rows = ""
+    for label, L, s in scenarios:
+        scenario_rows += (
+            f"| **{label}** | +{L:.0f}% | {s['n']:,} | {s['days']}d | "
+            f"{s['pool']:.0f}% | +{s['ic']:,} | +${s['ittv']:,} | {s['verdict']} |\n"
+        )
+    scenario_block = (
+        f"#### 🎯 Scenario Matrix — what if the lift is different?\n\n"
+        f"| Scenario | Lift | N/Arm | Days | Pool | iCustomers | iTTV | Verdict |\n"
+        f"|---|---|---|---|---|---|---|---|\n"
+        f"{scenario_rows}\n"
+        f"> Use this to pressure-test your hypothesis. If you'd still launch under the "
+        f"**Conservative** scenario, your test is robust. If only the **Stretch** scenario "
+        f"justifies the spend, you're betting on an outlier outcome.\n\n"
+    )
+
     # Segment history context
     seg_data = SEGMENT_BASELINES.get(segment, {})
     if seg_data:
@@ -510,12 +617,14 @@ def _handle_custom_sizing(
         f"**{name_str} — Custom Campaign Sizing**\n\n"
         f"Here's your sizing analysis for the {segment.replace('_', ' ')} segment.\n\n"
         f"{sizing_table}"
+        f"{reality_block}"
         f"**Segment Baseline**\n"
         f"{seg_context}\n\n"
         f"**Projected Outcome (if hypothesis holds)**\n"
         f"- Expected incremental customers: **+{i_customers:,}**\n"
         f"- Expected incremental TTV: **+${i_ttv:,}** (at ${aov:.2f} avg TTV per conversion)\n"
         f"- Pool usage: **{pool_pct:.0f}%** of {pop:,} eligible ({pool_emoji})\n\n"
+        f"{scenario_block}"
         f"**Test Design Checklist**\n"
         f"1. **Hypothesis**: {hypothesis} test at {confidence_pct}% confidence "
         f"(z = {z_a:.3f}) — "
