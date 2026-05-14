@@ -1204,20 +1204,51 @@ if st.session_state.active_scenario == "pre":
                 step=0.1, format="%.2f"
             )
 
+            hypothesis = st.radio(
+                "What's your hypothesis?",
+                options=["One-sided", "Two-sided"],
+                index=1,
+                horizontal=True,
+                help=(
+                    "**One-sided** — You're predicting the campaign will *improve* CVR "
+                    "(directional). Requires a smaller sample size because you're only "
+                    "testing one direction. Use when you're confident the change can't "
+                    "hurt.\n\n"
+                    "**Two-sided** — You're testing whether CVR changes *at all*, in "
+                    "either direction. More conservative and the industry standard — "
+                    "recommended unless you have a strong directional prior."
+                ),
+            )
+            confidence = st.radio(
+                "What confidence level do you need?",
+                options=["90%", "95%", "99%"],
+                index=1,
+                horizontal=True,
+                help=(
+                    "**90%** — 1-in-10 chance of a false positive. Good for fast, "
+                    "low-stakes decisions where speed matters more than certainty.\n\n"
+                    "**95%** — Industry standard. 1-in-20 chance of a false positive. "
+                    "Recommended for most campaigns.\n\n"
+                    "**99%** — Very strong evidence required. Use for high-budget, "
+                    "high-visibility, or hard-to-reverse campaigns."
+                ),
+            )
+
             submitted = st.form_submit_button("🔍 Size this campaign →",
                                               use_container_width=True)
             if submitted:
                 name_str = camp_name.strip() or seg_label.split("·")[0].strip()
                 baseline_cvr = baseline_input / 100
-                target_cvr   = baseline_cvr * (1 + lift_pct / 100)
                 question = (
                     f"[CUSTOM_SIZING] "
                     f"Campaign: {name_str} | Segment: {seg_key} | "
                     f"Population: {int(pop)} | Lift: {lift_pct}% | "
-                    f"Baseline CVR: {baseline_cvr:.5f}\n\n"
+                    f"Baseline CVR: {baseline_cvr:.5f} | "
+                    f"Hypothesis: {hypothesis} | Confidence: {confidence}\n\n"
                     f"I want to size a new **{name_str}** campaign targeting the "
                     f"{seg_key.replace('_', ' ')} segment. We have **{int(pop):,} eligible customers**. "
-                    f"What sample size do I need, how long will it take to reach statistical "
+                    f"Using a **{hypothesis.lower()} hypothesis** at **{confidence} confidence**, "
+                    f"what sample size do I need, how long will it take to reach statistical "
                     f"significance, and what incremental customers and TTV should I expect "
                     f"if we see a **{lift_pct}% relative lift** over the "
                     f"**{baseline_cvr*100:.2f}% historical baseline CVR**?"

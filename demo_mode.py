@@ -375,6 +375,8 @@ def _handle_custom_sizing(
     pop: int,
     lift_pct: float,
     baseline_cvr: float,
+    hypothesis: str = "Two-sided",
+    confidence_pct: int = 95,
 ) -> Generator[dict, None, None]:
     """Dynamic pre-campaign sizer — called from the 'Size a New Campaign' form."""
     from scipy.stats import norm
@@ -383,8 +385,12 @@ def _handle_custom_sizing(
     p_c = baseline_cvr
     p_t = round(p_c * (1 + lift_pct / 100), 6)
 
-    # Required N per arm (95% CI, 80% power)
-    z_a, z_b = norm.ppf(0.975), norm.ppf(0.80)
+    # z_α depends on hypothesis type + confidence level
+    one_sided = hypothesis.lower().startswith("one")
+    _conf_to_alpha = {90: 0.10, 95: 0.05, 99: 0.01}
+    alpha = _conf_to_alpha.get(confidence_pct, 0.05)
+    z_a = norm.ppf(1 - alpha) if one_sided else norm.ppf(1 - alpha / 2)
+    z_b = norm.ppf(0.80)  # 80% power (fixed)
     p_avg = (p_c + p_t) / 2
     num = (
         z_a * math.sqrt(2 * p_avg * (1 - p_avg))
@@ -458,6 +464,7 @@ def _handle_custom_sizing(
         sizing,
     )
 
+    hyp_label  = f"{'One' if one_sided else 'Two'}-sided · {confidence_pct}% CI"
     sizing_table = (
         f"#### Pre-Launch Sizing — {name_str}\n\n"
         f"| | CVR | Users per group (N/Arm) | Total N | Pool Coverage | Days to Sig |\n"
@@ -465,9 +472,9 @@ def _handle_custom_sizing(
         f"| **Baseline (control)** | {p_c * 100:.2f}% | — | — | — | — |\n"
         f"| **Target (+{lift_pct:.0f}% lift)** | **{p_t * 100:.2f}%** | **{n_req:,}** | "
         f"**{n_req * 2:,}** | {pool_pct}% of {pop:,} | **~{days_to_sig} days** |\n\n"
-        f"| Expected iCustomers | Expected iTTV | Eligible Pool | Recommendation |\n"
-        f"|---|---|---|---|\n"
-        f"| **+{i_customers:,}** | **+${i_ttv:,}** | {pop:,} | {rec} |\n\n"
+        f"| Expected iCustomers | Expected iTTV | Eligible Pool | Test Design | Recommendation |\n"
+        f"|---|---|---|---|---|\n"
+        f"| **+{i_customers:,}** | **+${i_ttv:,}** | {pop:,} | {hyp_label} | {rec} |\n\n"
     )
 
     # Segment history context
@@ -510,10 +517,14 @@ def _handle_custom_sizing(
         f"- Expected incremental TTV: **+${i_ttv:,}** (at ${aov:.2f} avg TTV per conversion)\n"
         f"- Pool usage: **{pool_pct:.0f}%** of {pop:,} eligible ({pool_emoji})\n\n"
         f"**Test Design Checklist**\n"
-        f"1. **Power**: {n_req:,} users per arm ({n_req * 2:,} total) — {arm_health}\n"
-        f"2. **Speed**: ~{days_to_sig} days to significance at {int(daily_entry):,} daily entries\n"
-        f"3. **Practical floor**: Stop early if absolute lift < +{(p_t - p_c) / 2 * 100:.2f} pp in week 1\n"
-        f"4. **Confounders**: Avoid promotional overlap windows; ensure clean holdout\n\n"
+        f"1. **Hypothesis**: {hypothesis} test at {confidence_pct}% confidence "
+        f"(z = {z_a:.3f}) — "
+        + ("directional, requires smaller sample" if one_sided
+           else "tests both directions, industry standard") + "\n"
+        f"2. **Power**: {n_req:,} users per arm ({n_req * 2:,} total) — {arm_health}\n"
+        f"3. **Speed**: ~{days_to_sig} days to significance at {int(daily_entry):,} daily entries\n"
+        f"4. **Practical floor**: Stop early if absolute lift < +{(p_t - p_c) / 2 * 100:.2f} pp in week 1\n"
+        f"5. **Confounders**: Avoid promotional overlap windows; ensure clean holdout\n\n"
         f"{rec} — {rec_note}"
     )
 
@@ -1478,22 +1489,29 @@ def stream_demo_response(messages: list[dict]) -> Generator[dict, None, None]:
     # 0. Custom campaign sizer (from the PRE-campaign 'Size a New Campaign' form)
     #    The form prefixes its question with [CUSTOM_SIZING] and embeds structured params.
     if "[custom_sizing]" in text_lower:
-        # Parse: "Campaign: X | Segment: Y | Population: Z | Lift: N% | Baseline CVR: M"
-        camp_m = re.search(r"campaign:\s*([^|]+)", text, re.IGNORECASE)
-        seg_m  = re.search(r"segment:\s*([^|]+)", text, re.IGNORECASE)
-        pop_m  = re.search(r"population:\s*([\d,]+)", text, re.IGNORECASE)
-        lift_m = re.search(r"lift:\s*([\d.]+)%", text, re.IGNORECASE)
-        base_m = re.search(r"baseline cvr:\s*([\d.]+)", text, re.IGNORECASE)
+        # Parse: "Campaign: X | Segment: Y | Population: Z | Lift: N% | Baseline CVR: M | Hypothesis: H | Confidence: C%"
+        camp_m  = re.search(r"campaign:\s*([^|]+)", text, re.IGNORECASE)
+        seg_m   = re.search(r"segment:\s*([^|]+)", text, re.IGNORECASE)
+        pop_m   = re.search(r"population:\s*([\d,]+)", text, re.IGNORECASE)
+        lift_m  = re.search(r"lift:\s*([\d.]+)%", text, re.IGNORECASE)
+        base_m  = re.search(r"baseline cvr:\s*([\d.]+)", text, re.IGNORECASE)
+        hyp_m   = re.search(r"hypothesis:\s*(one-sided|two-sided)", text, re.IGNORECASE)
+        conf_m  = re.search(r"confidence:\s*(\d+)%", text, re.IGNORECASE)
 
-        camp_name = camp_m.group(1).strip() if camp_m else ""
-        seg_key   = seg_m.group(1).strip() if seg_m else "App_Deals"
-        pop_val   = int(pop_m.group(1).replace(",", "")) if pop_m else 100_000
-        lift_val  = float(lift_m.group(1)) if lift_m else 15.0
-        base_cvr  = (
+        camp_name  = camp_m.group(1).strip() if camp_m else ""
+        seg_key    = seg_m.group(1).strip() if seg_m else "App_Deals"
+        pop_val    = int(pop_m.group(1).replace(",", "")) if pop_m else 100_000
+        lift_val   = float(lift_m.group(1)) if lift_m else 15.0
+        base_cvr   = (
             float(base_m.group(1)) if base_m
             else SEGMENT_BASELINES.get(seg_key, {}).get("avg_cvr", 0.05)
         )
-        yield from _handle_custom_sizing(camp_name, seg_key, pop_val, lift_val, base_cvr)
+        hypothesis = hyp_m.group(1).title() if hyp_m else "Two-sided"
+        conf_pct   = int(conf_m.group(1)) if conf_m else 95
+
+        yield from _handle_custom_sizing(
+            camp_name, seg_key, pop_val, lift_val, base_cvr, hypothesis, conf_pct
+        )
         return
 
     # 1. Comparison takes priority over scenario detection
