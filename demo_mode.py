@@ -369,6 +369,181 @@ def _scenario_pre_campaign() -> Generator[dict, None, None]:
     yield {"type": "done"}
 
 
+def _handle_custom_sizing(
+    campaign_name: str,
+    segment: str,
+    pop: int,
+    lift_pct: float,
+    baseline_cvr: float,
+) -> Generator[dict, None, None]:
+    """Dynamic pre-campaign sizer — called from the 'Size a New Campaign' form."""
+    from scipy.stats import norm
+    import math
+
+    p_c = baseline_cvr
+    p_t = round(p_c * (1 + lift_pct / 100), 6)
+
+    # Required N per arm (95% CI, 80% power)
+    z_a, z_b = norm.ppf(0.975), norm.ppf(0.80)
+    p_avg = (p_c + p_t) / 2
+    num = (
+        z_a * math.sqrt(2 * p_avg * (1 - p_avg))
+        + z_b * math.sqrt(p_c * (1 - p_c) + p_t * (1 - p_t))
+    ) ** 2
+    n_req = math.ceil(num / (p_t - p_c) ** 2)
+
+    # Days to significance (daily entry ≈ eligible pop / 30)
+    daily_entry = max(1, pop / 30)
+    days_to_sig = max(1, math.ceil((n_req * 2) / daily_entry))
+
+    # Pool coverage
+    pool_pct = round((n_req * 2) / pop * 100, 1)
+    feasible = pool_pct <= 100
+
+    # AOV: use $163 for Best Buy segments, $126.50 otherwise
+    aov = 163.0 if "best_buy" in segment.lower() else 126.50
+    i_customers = int((p_t - p_c) * n_req)
+    i_ttv = int(i_customers * aov)
+
+    # Recommendation
+    if not feasible:
+        rec = "🔴 RETHINK"
+        rec_note = (
+            f"**Pool too small.** You'd need {n_req * 2:,} users ({pool_pct:.0f}% of your "
+            f"{pop:,} eligible), which exceeds 100%. Consider broadening the eligible "
+            f"audience or accepting a lower confidence level."
+        )
+    elif days_to_sig > 60:
+        rec = "🟡 WATCH"
+        rec_note = (
+            f"**Slow test.** At {int(daily_entry):,} daily entries it'll take ~{days_to_sig} "
+            f"days to reach significance. Consider increasing the eligible pool or targeting "
+            f"a higher-lift segment."
+        )
+    else:
+        rec = "🟢 GREENLIGHT"
+        rec_note = (
+            f"**Well-powered.** {pool_pct:.0f}% pool coverage, ~{days_to_sig} days to "
+            f"significance. The projected return justifies the spend — launch when ready."
+        )
+
+    name_str = campaign_name.strip() if campaign_name and campaign_name.strip() else \
+        f"{segment.replace('_', ' ')} Campaign"
+
+    sizing = {
+        "campaign_name": name_str,
+        "segment": segment,
+        "baseline_cvr": round(p_c, 5),
+        "expected_cvr_target": round(p_t, 5),
+        "expected_lift_pct": lift_pct,
+        "required_n_per_arm": n_req,
+        "required_n_total": n_req * 2,
+        "eligible_population": pop,
+        "population_coverage_pct": pool_pct,
+        "estimated_days_to_sig": days_to_sig,
+        "expected_i_customers": i_customers,
+        "expected_i_ttv": i_ttv,
+        "recommendation": rec,
+    }
+
+    yield from _tool_call(
+        "get_segment_baselines", {"segment": segment},
+        {segment: SEGMENT_BASELINES.get(segment, {"avg_cvr": p_c})},
+    )
+    yield from _tool_call(
+        "size_campaign",
+        {"campaign_name": name_str, "segment": segment,
+         "expected_lift_pct": lift_pct, "eligible_pop": pop,
+         "baseline_cvr": round(p_c, 5)},
+        sizing,
+    )
+
+    sizing_table = (
+        f"#### Pre-Launch Sizing — {name_str}\n\n"
+        f"| | CVR | N / Arm | Total N | Pool Coverage | Days to Sig |\n"
+        f"|---|---|---|---|---|---|\n"
+        f"| **Baseline (control)** | {p_c * 100:.2f}% | — | — | — | — |\n"
+        f"| **Target (+{lift_pct:.0f}% lift)** | **{p_t * 100:.2f}%** | **{n_req:,}** | "
+        f"**{n_req * 2:,}** | {pool_pct}% of {pop:,} | **~{days_to_sig} days** |\n\n"
+        f"| Expected iCustomers | Expected iTTV | Eligible Pool | Recommendation |\n"
+        f"|---|---|---|---|\n"
+        f"| **+{i_customers:,}** | **+${i_ttv:,}** | {pop:,} | {rec} |\n\n"
+    )
+
+    # Segment history context
+    seg_data = SEGMENT_BASELINES.get(segment, {})
+    if seg_data:
+        n_hist = seg_data.get("n_campaigns", 0)
+        min_cvr = seg_data.get("min_cvr", p_c)
+        max_cvr = seg_data.get("max_cvr", p_c)
+        seg_context = (
+            f"Across **{n_hist} historical {segment.replace('_', ' ')} campaigns**, "
+            f"baseline CVR ranges from **{min_cvr * 100:.2f}%** to **{max_cvr * 100:.2f}%** "
+            f"(avg **{p_c * 100:.2f}%**). Your {lift_pct:.0f}% lift hypothesis means "
+            f"reaching **{p_t * 100:.2f}%** in the target arm."
+        )
+    else:
+        seg_context = (
+            f"Using your supplied baseline of **{p_c * 100:.2f}%** CVR. "
+            f"A {lift_pct:.0f}% relative lift means reaching **{p_t * 100:.2f}%** in the target arm."
+        )
+
+    pool_emoji = (
+        "✅ comfortable" if pool_pct <= 70
+        else "⚠️ tight — leave room for a v2" if pool_pct <= 100
+        else "🔴 exceeds pool"
+    )
+    arm_health = (
+        "well within your pool ✅" if pool_pct <= 70
+        else "using most of your pool ⚠️" if pool_pct <= 100
+        else "exceeds pool 🔴"
+    )
+
+    narrative = (
+        f"**{name_str} — Custom Campaign Sizing**\n\n"
+        f"Here's your sizing analysis for the {segment.replace('_', ' ')} segment.\n\n"
+        f"{sizing_table}"
+        f"**Segment Baseline**\n"
+        f"{seg_context}\n\n"
+        f"**Projected Outcome (if hypothesis holds)**\n"
+        f"- Expected incremental customers: **+{i_customers:,}**\n"
+        f"- Expected incremental TTV: **+${i_ttv:,}** (at ${aov:.2f} avg TTV per conversion)\n"
+        f"- Pool usage: **{pool_pct:.0f}%** of {pop:,} eligible ({pool_emoji})\n\n"
+        f"**Test Design Checklist**\n"
+        f"1. **Power**: {n_req:,} users per arm ({n_req * 2:,} total) — {arm_health}\n"
+        f"2. **Speed**: ~{days_to_sig} days to significance at {int(daily_entry):,} daily entries\n"
+        f"3. **Practical floor**: Stop early if absolute lift < +{(p_t - p_c) / 2 * 100:.2f} pp in week 1\n"
+        f"4. **Confounders**: Avoid promotional overlap windows; ensure clean holdout\n\n"
+        f"{rec} — {rec_note}"
+    )
+
+    # Historical analogues
+    pseudo_target = {
+        "segment": segment,
+        "TARGET_AUDIENCE": pop,
+        "CVR_TARGET": p_c,
+        "CAMPAIGN_CANVAS_ID": "planned-custom",
+    }
+    similar = find_similar_campaigns(pseudo_target, k=3, min_score=4)
+    if similar:
+        top = similar[0]
+        top_ttv = top["campaign"].get("iTTV") or 0
+        top_cvr = top["campaign"].get("CVR_TARGET") or 0
+        narrative += (
+            f"\n\n**🔁 Best historical analog:** *{top['name']}* "
+            f"(Canvas ID `{top['canvas_id'][:8]}…`). "
+            f"That campaign landed at {top_cvr * 100:.2f}% CVR"
+            + (f" — if {name_str} lands there, expect **${top_ttv:+,.0f}** iTTV" if top_ttv else "")
+            + ". This is your confidence band, not a guarantee — but it's evidence the segment responds."
+        )
+        narrative += similar_summary_markdown(
+            similar, header=f"Historical {segment.replace('_', ' ')} campaigns"
+        )
+
+    yield from _stream_text(narrative)
+    yield {"type": "done"}
+
+
 # ── Intent detection & ad-hoc handlers ─────────────────────────────────────────
 
 
@@ -1299,6 +1474,27 @@ def stream_demo_response(messages: list[dict]) -> Generator[dict, None, None]:
 
     text = last_user["content"]
     text_lower = text.lower()
+
+    # 0. Custom campaign sizer (from the PRE-campaign 'Size a New Campaign' form)
+    #    The form prefixes its question with [CUSTOM_SIZING] and embeds structured params.
+    if "[custom_sizing]" in text_lower:
+        # Parse: "Campaign: X | Segment: Y | Population: Z | Lift: N% | Baseline CVR: M"
+        camp_m = re.search(r"campaign:\s*([^|]+)", text, re.IGNORECASE)
+        seg_m  = re.search(r"segment:\s*([^|]+)", text, re.IGNORECASE)
+        pop_m  = re.search(r"population:\s*([\d,]+)", text, re.IGNORECASE)
+        lift_m = re.search(r"lift:\s*([\d.]+)%", text, re.IGNORECASE)
+        base_m = re.search(r"baseline cvr:\s*([\d.]+)", text, re.IGNORECASE)
+
+        camp_name = camp_m.group(1).strip() if camp_m else ""
+        seg_key   = seg_m.group(1).strip() if seg_m else "App_Deals"
+        pop_val   = int(pop_m.group(1).replace(",", "")) if pop_m else 100_000
+        lift_val  = float(lift_m.group(1)) if lift_m else 15.0
+        base_cvr  = (
+            float(base_m.group(1)) if base_m
+            else SEGMENT_BASELINES.get(seg_key, {}).get("avg_cvr", 0.05)
+        )
+        yield from _handle_custom_sizing(camp_name, seg_key, pop_val, lift_val, base_cvr)
+        return
 
     # 1. Comparison takes priority over scenario detection
     #    (otherwise "Compare July 4th and Memorial Day" triggers the POST scenario)

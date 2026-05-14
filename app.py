@@ -511,6 +511,8 @@ if "active_scenario" not in st.session_state:
     st.session_state.active_scenario = None
 if "pending_question" not in st.session_state:
     st.session_state.pending_question = None
+if "pre_mode" not in st.session_state:
+    st.session_state.pre_mode = None   # None = chooser, "demo" = hard-coded, "new" = custom form
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -1097,9 +1099,119 @@ for col, sc in zip([c1, c2, c3, c4, c5], SCENARIOS):
     with col:
         active = "🔵 " if st.session_state.active_scenario == sc["id"] else ""
         if st.button(f"{sc['icon']} {active}{sc['stage']}: {sc['title']}", key=f"sc_{sc['id']}"):
-            st.session_state.pending_question = sc["question"]
-            st.session_state.active_scenario  = sc["id"]
+            if sc["id"] == "pre":
+                # PRE opens a chooser — don't fire the question yet
+                st.session_state.active_scenario = "pre"
+                st.session_state.pre_mode = None
+            else:
+                st.session_state.pending_question = sc["question"]
+                st.session_state.active_scenario  = sc["id"]
+                st.session_state.pre_mode = None
             st.rerun()
+
+# ── PRE-CAMPAIGN CHOOSER (shown when PRE button is active) ────────────────────
+_SEGMENT_OPTIONS = {
+    "App Deals  ·  8.94% baseline":            ("App_Deals",            0.0894),
+    "Best Buy New Purchasers  ·  1.06%":        ("Best_Buy_New",         0.01056),
+    "Fashion Nova Loyalist  ·  6.00%":          ("Fashion_Nova_Loyalist", 0.0600),
+    "App Deals Seasonal  ·  8.00%":             ("App_Deals_Seasonal",    0.0800),
+    "App Deals High Intent  ·  10.00%":         ("App_Deals_High_Intent", 0.1000),
+    "BAU Billpay  ·  20.79%":                   ("BAU_Billpay",           0.2079),
+    "Custom (enter baseline manually)":          ("Custom",               0.05),
+}
+
+if st.session_state.active_scenario == "pre":
+    st.markdown("""
+    <div style="background:#FFFFFF;border:1px solid #D6D4D2;border-radius:12px;
+                padding:18px 22px;margin:10px 0 6px 0;">
+      <div class="eyebrow" style="margin-bottom:10px;">📋 Pre-Campaign — choose your path</div>
+    </div>""", unsafe_allow_html=True)
+
+    demo_col, divider_col, new_col = st.columns([5, 1, 6])
+
+    with demo_col:
+        st.markdown("""
+        <div style="background:#F5F4F2;border:1px solid #E1E0DF;border-radius:10px;
+                    padding:14px 16px;height:100%;">
+          <div style="font-size:0.8rem;font-weight:700;color:#1A0725;margin-bottom:4px;">
+            📋 Best Buy Demo
+          </div>
+          <div style="font-size:0.74rem;color:#786D79;line-height:1.5;">
+            Run the pre-loaded Best Buy New Purchasers scenario with real historical data
+            — instantly shows sizing, days to significance, and expected iTTV.
+          </div>
+        </div>""", unsafe_allow_html=True)
+        st.markdown("<div style='margin-top:10px;'></div>", unsafe_allow_html=True)
+        if st.button("▶ Run Best Buy Demo", key="pre_run_demo", use_container_width=True):
+            pre_sc = next(s for s in SCENARIOS if s["id"] == "pre")
+            st.session_state.pending_question = pre_sc["question"]
+            st.session_state.pre_mode = "demo"
+            st.rerun()
+
+    with divider_col:
+        st.markdown("""
+        <div style="display:flex;justify-content:center;align-items:center;height:100%;
+                    padding-top:20px;">
+          <div style="color:#D6D4D2;font-size:1.1rem;font-weight:300;">or</div>
+        </div>""", unsafe_allow_html=True)
+
+    with new_col:
+        st.markdown("""
+        <div style="background:#EFE9FA;border:1px solid #6442BD;border-radius:10px;
+                    padding:14px 16px;">
+          <div style="font-size:0.8rem;font-weight:700;color:#411260;margin-bottom:4px;">
+            🆕 Size a New Campaign
+          </div>
+          <div style="font-size:0.74rem;color:#6442BD;line-height:1.5;">
+            Answer 3 questions and the agent will calculate exactly what you need.
+          </div>
+        </div>""", unsafe_allow_html=True)
+
+        with st.form("new_campaign_sizer", clear_on_submit=False):
+            camp_name = st.text_input("Campaign name (optional)",
+                                      placeholder="e.g. Spring BNPL Promo")
+            seg_label = st.selectbox("What segment are you targeting?",
+                                     list(_SEGMENT_OPTIONS.keys()))
+            seg_key, auto_baseline = _SEGMENT_OPTIONS[seg_label]
+
+            pop = st.number_input("How many eligible customers do you have?",
+                                  min_value=1_000, max_value=10_000_000,
+                                  value=100_000, step=5_000,
+                                  format="%d")
+            lift_pct = st.select_slider("What conversion lift are you targeting?",
+                                        options=[5, 10, 15, 20, 25, 30],
+                                        value=15,
+                                        format_func=lambda x: f"+{x}%")
+
+            # Editable baseline — auto-filled from segment
+            baseline_input = st.number_input(
+                f"Baseline CVR % (auto-filled from segment)",
+                min_value=0.1, max_value=50.0,
+                value=round(auto_baseline * 100, 2),
+                step=0.1, format="%.2f"
+            )
+
+            submitted = st.form_submit_button("🔍 Size this campaign →",
+                                              use_container_width=True)
+            if submitted:
+                name_str = camp_name.strip() or seg_label.split("·")[0].strip()
+                baseline_cvr = baseline_input / 100
+                target_cvr   = baseline_cvr * (1 + lift_pct / 100)
+                question = (
+                    f"[CUSTOM_SIZING] "
+                    f"Campaign: {name_str} | Segment: {seg_key} | "
+                    f"Population: {int(pop)} | Lift: {lift_pct}% | "
+                    f"Baseline CVR: {baseline_cvr:.5f}\n\n"
+                    f"I want to size a new **{name_str}** campaign targeting the "
+                    f"{seg_key.replace('_', ' ')} segment. We have **{int(pop):,} eligible customers**. "
+                    f"What sample size do I need, how long will it take to reach statistical "
+                    f"significance, and what incremental customers and TTV should I expect "
+                    f"if we see a **{lift_pct}% relative lift** over the "
+                    f"**{baseline_cvr*100:.2f}% historical baseline CVR**?"
+                )
+                st.session_state.pending_question = question
+                st.session_state.pre_mode = "new"
+                st.rerun()
 
 st.markdown("<hr>", unsafe_allow_html=True)
 
