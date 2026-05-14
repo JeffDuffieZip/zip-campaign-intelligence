@@ -7,6 +7,8 @@ marketing-team self-service.
 
 Built for the Zip Co internal hackathon.
 
+🔗 **Live app:** [zip-campaign-intelligence.streamlit.app](https://zip-campaign-intelligence-8rr5s9bam7zettdsmbr33p.streamlit.app/)
+
 ---
 
 ## Quick start (local)
