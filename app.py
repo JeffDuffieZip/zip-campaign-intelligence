@@ -14,6 +14,12 @@ import markdown as md_lib
 import streamlit as st
 from dotenv import load_dotenv
 
+try:
+    import plotly.graph_objects as go
+    PLOTLY_OK = True
+except Exception:
+    PLOTLY_OK = False
+
 from agent import stream_response
 from tools.mock_data import CAMPAIGNS
 
@@ -841,6 +847,138 @@ def render_executive_report():
     req_n_str     = f"{required_n:,}"          if required_n is not None else "—"
     exp_ic_str    = f"{exp_ic:,}"              if exp_ic   is not None else "—"
     exp_ittv_str  = f"${exp_ittv:,.0f}"        if exp_ittv is not None else "—"
+
+    # ── Visual Dashboard (gauge + incrementality donut) ───────────────────────
+    if PLOTLY_OK and (t_stat is not None or (ic_val and cann is not None)):
+        st.markdown(
+            '<div class="eyebrow" style="margin:18px 0 8px 0;">📊 Visual Dashboard</div>',
+            unsafe_allow_html=True,
+        )
+        viz_l, viz_r = st.columns(2)
+
+        # — Confidence Gauge —
+        with viz_l:
+            t_show = float(t_stat) if t_stat is not None else 0.0
+            gauge_val = min(abs(t_show), 3.5)
+            bar_color = ("#1B7E4F" if abs(t_show) >= 1.96 else
+                         "#A55A00" if abs(t_show) >= 1.0 else "#B43A3A")
+            fig_g = go.Figure(go.Indicator(
+                mode="gauge+number",
+                value=gauge_val,
+                number={"valueformat": ".2f", "font": {"size": 36, "color": "#1A0725"},
+                        "suffix": f"<span style='font-size:0.55em;color:#786D79'> |t|</span>"},
+                gauge={
+                    "axis": {"range": [0, 3.5], "tickwidth": 1, "tickcolor": "#786D79",
+                             "tickvals": [0, 1.645, 1.96, 2.576, 3.5],
+                             "ticktext": ["0", "90%", "95%", "99%", "3.5+"]},
+                    "bar": {"color": bar_color, "thickness": 0.32},
+                    "bgcolor": "#F5F4F2",
+                    "borderwidth": 0,
+                    "steps": [
+                        {"range": [0, 1.645], "color": "#FBEAEA"},
+                        {"range": [1.645, 1.96], "color": "#FBF2E5"},
+                        {"range": [1.96, 3.5], "color": "#E8F3EC"},
+                    ],
+                    "threshold": {
+                        "line": {"color": "#1A0725", "width": 3},
+                        "thickness": 0.85,
+                        "value": 1.96,
+                    },
+                },
+                domain={"x": [0, 1], "y": [0, 1]},
+            ))
+            fig_g.update_layout(
+                height=240, margin=dict(l=20, r=20, t=40, b=10),
+                paper_bgcolor="#FFFFFF",
+                title={"text": "<b>Confidence Gauge</b><br><span style='font-size:0.7em;color:#786D79'>black line = 95% CI threshold</span>",
+                       "x": 0.5, "xanchor": "center", "font": {"size": 14, "color": "#1A0725"}},
+            )
+            st.plotly_chart(fig_g, use_container_width=True, config={"displayModeBar": False})
+
+            if t_stat is not None:
+                pct_to_sig = min(100, (abs(t_show) / 1.96) * 100)
+                if abs(t_show) >= 1.96:
+                    msg = f"🟢 <b>Past the line.</b> Result is statistically significant."
+                elif abs(t_show) >= 1.0:
+                    msg = f"🟡 <b>{pct_to_sig:.0f}% of the way to significance</b> — signal is building."
+                else:
+                    msg = f"🔴 <b>Only {pct_to_sig:.0f}% of the way</b> — signal hasn't emerged yet."
+                st.markdown(
+                    f"<div style='text-align:center;font-size:0.82rem;color:#1A0725;"
+                    f"margin-top:-12px;'>{msg}</div>",
+                    unsafe_allow_html=True,
+                )
+
+        # — Incrementality Donut —
+        with viz_r:
+            if ic_val and cann is not None and ic_val > 0:
+                total_conv = int(ic_val / (1 - cann)) if cann < 1 else int(ic_val)
+                cannibal_n = total_conv - int(ic_val)
+                fig_d = go.Figure(go.Pie(
+                    values=[int(ic_val), cannibal_n],
+                    labels=["Incremental (iCustomers)", "Cannibalized (would convert anyway)"],
+                    hole=0.6,
+                    marker={"colors": ["#6442BD", "#E1E0DF"],
+                            "line": {"color": "#FFFFFF", "width": 2}},
+                    textinfo="percent",
+                    textfont={"size": 14, "color": "#FFFFFF"},
+                    hovertemplate="<b>%{label}</b><br>%{value:,} customers<br>%{percent}<extra></extra>",
+                    sort=False,
+                ))
+                fig_d.update_layout(
+                    height=240, margin=dict(l=20, r=20, t=40, b=10),
+                    paper_bgcolor="#FFFFFF",
+                    showlegend=True,
+                    legend=dict(orientation="h", yanchor="bottom", y=-0.2,
+                                xanchor="center", x=0.5, font=dict(size=10)),
+                    title={"text": f"<b>Incrementality Breakdown</b><br>"
+                                   f"<span style='font-size:0.7em;color:#786D79'>"
+                                   f"{int(ic_val):,} truly incremental of {total_conv:,} total</span>",
+                           "x": 0.5, "xanchor": "center", "font": {"size": 14, "color": "#1A0725"}},
+                    annotations=[dict(
+                        text=f"<b style='font-size:18px;color:#6442BD'>{(1-cann)*100:.0f}%</b><br>"
+                             f"<span style='font-size:10px;color:#786D79'>net-new</span>",
+                        x=0.5, y=0.5, showarrow=False)],
+                )
+                st.plotly_chart(fig_d, use_container_width=True, config={"displayModeBar": False})
+
+                cann_msg = ("🟢 <b>Healthy</b> — most converters were genuinely new."
+                            if cann < 0.4 else
+                            "🟡 <b>Moderate cannibalization</b> — watch this." if cann < 0.6 else
+                            "🔴 <b>High cannibalization</b> — campaign mostly crediting organic.")
+                st.markdown(
+                    f"<div style='text-align:center;font-size:0.82rem;color:#1A0725;"
+                    f"margin-top:-12px;'>{cann_msg}</div>",
+                    unsafe_allow_html=True,
+                )
+            elif exp_ic and required_n:
+                # Pre-campaign: show projected funnel
+                fig_f = go.Figure(go.Funnel(
+                    y=["Eligible Audience (per arm)", "Target Arm Reached",
+                       "Expected Converters", "Truly Incremental"],
+                    x=[required_n * 2, required_n,
+                       int(required_n * 0.05) if required_n else 0,
+                       int(exp_ic) if exp_ic else 0],
+                    textinfo="value+percent initial",
+                    marker={"color": ["#E1E0DF", "#C9B8E8", "#9B7BD4", "#6442BD"]},
+                ))
+                fig_f.update_layout(
+                    height=240, margin=dict(l=20, r=20, t=40, b=10),
+                    paper_bgcolor="#FFFFFF",
+                    title={"text": "<b>Projected Test Funnel</b><br>"
+                                   "<span style='font-size:0.7em;color:#786D79'>if hypothesis holds</span>",
+                           "x": 0.5, "xanchor": "center", "font": {"size": 14, "color": "#1A0725"}},
+                )
+                st.plotly_chart(fig_f, use_container_width=True, config={"displayModeBar": False})
+            else:
+                st.markdown(
+                    "<div style='display:flex;align-items:center;justify-content:center;"
+                    "height:240px;color:#786D79;font-size:0.85rem;text-align:center;"
+                    "background:#FFFFFF;border:1px dashed #E1E0DF;border-radius:10px;'>"
+                    "Incrementality breakdown will populate<br>once iCustomers + cannibalization are available."
+                    "</div>",
+                    unsafe_allow_html=True,
+                )
 
     # ── Section 2: Business impact ────────────────────────────────────────────
     st.markdown('<div class="eyebrow" style="margin:18px 0 8px 0;">2 · Business Impact</div>',
