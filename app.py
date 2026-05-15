@@ -557,6 +557,10 @@ def extract_verdict(text: str, tool_results: list) -> dict:
                     "i_customers": data.get("iCustomers"),
                     "i_ttv": data.get("iTTV"),
                     "campaign_name": data.get("display_name", data.get("name", "")),
+                    "launch_date": data.get("CAMPAIGN_LAUNCH_DATE"),
+                    "status": data.get("STATUS"),
+                    "segment": data.get("segment"),
+                    "channel": data.get("Campaign Canvas Channel"),
                 })
             if "required_n_per_arm" in data:
                 v.update({
@@ -714,6 +718,10 @@ def render_executive_report():
     i_ttv        = v.get("i_ttv")
     cann         = v.get("cannibalization")
     campaign_name = v.get("campaign_name", "")
+    launch_date  = v.get("launch_date")
+    status       = v.get("status")
+    segment      = v.get("segment")
+    channel      = v.get("channel")
     days_to_sig  = v.get("days_to_sig")
     required_n   = v.get("required_n")
     roi_pct      = v.get("roi_pct")
@@ -755,6 +763,41 @@ def render_executive_report():
       </div>
       {f'<div style="margin-top:12px;padding:10px 14px;background:#F5F4F2;border-radius:8px;font-size:0.8rem;color:#786D79;font-style:italic;">&ldquo;{last_q[:200]}{"…" if len(last_q)>200 else ""}&rdquo;</div>' if last_q else ""}
     </div>""", unsafe_allow_html=True)
+
+    # ── Campaign identity card (name + launch date + status + segment/channel) ──
+    if campaign_name:
+        status_chip = ""
+        if status:
+            s = str(status).lower()
+            s_color = ("#1B7E4F" if s == "completed" else
+                       "#A55A00" if s == "running" else "#786D79")
+            s_bg    = ("#E8F3EC" if s == "completed" else
+                       "#FBF2E5" if s == "running" else "#F5F4F2")
+            status_chip = (f'<span style="background:{s_bg};color:{s_color};'
+                           f'border:1px solid {s_color};padding:3px 10px;border-radius:14px;'
+                           f'font-size:0.65rem;font-weight:700;letter-spacing:0.5px;'
+                           f'text-transform:uppercase;">● {status}</span>')
+
+        meta_bits = []
+        if launch_date: meta_bits.append(f'📅 Launched <b style="color:#411260;">{launch_date}</b>')
+        if segment:     meta_bits.append(f'🎯 {str(segment).replace("_"," ")}')
+        if channel:     meta_bits.append(f'📡 {channel}')
+        meta_line = " &nbsp;·&nbsp; ".join(meta_bits)
+
+        st.markdown(f"""
+        <div style="background:#FFFFFF;border:1px solid #E1E0DF;border-left:4px solid #6442BD;
+                    border-radius:10px;padding:14px 18px;margin-bottom:16px;">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;">
+            <div style="flex:1;min-width:0;">
+              <div class="eyebrow" style="margin-bottom:4px;color:#6442BD;">CAMPAIGN</div>
+              <div style="font-size:0.95rem;font-weight:700;color:#1A0725;word-break:break-word;">
+                {campaign_name}
+              </div>
+              {f'<div style="font-size:0.75rem;color:#786D79;margin-top:6px;">{meta_line}</div>' if meta_line else ""}
+            </div>
+            {f'<div style="flex-shrink:0;">{status_chip}</div>' if status_chip else ""}
+          </div>
+        </div>""", unsafe_allow_html=True)
 
     # ── Bottom Line card — synthesised one-line agent's take ──────────────────
     def _tldr_line():
