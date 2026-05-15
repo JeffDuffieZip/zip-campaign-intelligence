@@ -1900,6 +1900,9 @@ with tab_chat:
       # If a new question was just asked, push it into messages BEFORE rendering
       # so it appears immediately in the (reversed) history with a streaming slot.
       if question:
+          # Reset the verdict so the Executive Report rebuilds cleanly for the new
+          # analysis (prevents POST campaign data leaking into a later ROI / PRE run).
+          st.session_state.verdict = {}
           st.session_state.messages.append({"role": "user", "content": question})
 
       # Small controls row: turn count + clear-history
