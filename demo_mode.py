@@ -1579,11 +1579,11 @@ def _handle_roi_matrix(
 
 *All CVR tiers · 10% relative lift target · 95% CI · 80% power*
 
-📑 **What's in this report:** 1 · 💡 TL;DR · 2 · 💰 Unit Economics · 3 · 📊 Tier Comparison · 4 · 🔍 Tier Detail · 5 · 🎯 How to Pick Your Tier
+📑 **What's in this report:** 1 · 💡 Bottom Line · 2 · 💰 Unit Economics · 3 · 📊 Tier Comparison · 4 · 🔍 Tier Detail · 5 · 🎯 How to Pick Your Tier
 
 ---
 
-### 1 · 💡 TL;DR
+### 1 · 💡 Bottom Line
 
 > Every Zip incentive returns **${net_per_conv:.2f} net margin per incremental conversion** — a **{fixed_roi:.1f}% ROI** that holds at every CVR level. The CVR tier you pick changes **how fast** you read out and **how much** total NTM you book — not the per-dollar return.
 >
@@ -1713,11 +1713,11 @@ def _handle_roi_lookup(c: dict) -> Generator[dict, None, None]:
 
 *Segment: {seg_str} · Channel: {channel} · Audience: {pop:,} · Baseline CVR: {p_base*100:.2f}%*
 
-📑 **What's in this report:** 1 · 💡 TL;DR · 2 · 💰 Unit Economics · 3 · 📊 Lift Sensitivity · 4 · 🎯 Recommendation
+📑 **What's in this report:** 1 · 💡 Bottom Line · 2 · 💰 Unit Economics · 3 · 📊 Lift Sensitivity · 4 · 🎯 Recommendation
 
 ---
 
-### 1 · 💡 TL;DR
+### 1 · 💡 Bottom Line
 
 > At your audience and baseline, every incremental conversion returns **${NET_PER_CONV:.2f} net margin** — a **{FIXED_ROI:.1f}% ROI**.
 >

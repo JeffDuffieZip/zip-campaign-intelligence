@@ -750,7 +750,7 @@ def render_executive_report():
       {f'<div style="margin-top:12px;padding:10px 14px;background:#F5F4F2;border-radius:8px;font-size:0.8rem;color:#786D79;font-style:italic;">&ldquo;{last_q[:200]}{"…" if len(last_q)>200 else ""}&rdquo;</div>' if last_q else ""}
     </div>""", unsafe_allow_html=True)
 
-    # ── TL;DR card — synthesised one-line agent's take ────────────────────────
+    # ── Bottom Line card — synthesised one-line agent's take ──────────────────
     def _tldr_line():
         nm = campaign_name or "this campaign"
         if rec in ("SIZE_AND_LAUNCH", "GREENLIGHT") or (rec or "").startswith("🟢 YES"):
@@ -784,7 +784,7 @@ def render_executive_report():
                 box-shadow:0 1px 3px rgba(100,66,189,0.10);">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
         <span style="font-size:1.4rem;">💡</span>
-        <span class="eyebrow" style="color:#411260;">The Agent's Take · TL;DR</span>
+        <span class="eyebrow" style="color:#411260;">The Agent's Take · Bottom Line</span>
       </div>
       <div style="color:#1A0725;font-size:1.0rem;line-height:1.55;font-weight:500;">
         {_tldr_line()}
