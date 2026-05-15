@@ -551,16 +551,28 @@ def extract_verdict(text: str, tool_results: list) -> dict:
                     "days_to_sig": data.get("days_to_sig"),
                 })
             if "CVR_T_STAT" in data:
+                # Parse attribution window from the long Braze name
+                # (last path segment like "1day" / "3Day" / "7day")
+                long_name = data.get("name", "") or ""
+                attr_window = None
+                if "/" in long_name:
+                    tail = long_name.rsplit("/", 1)[-1].lower().strip()
+                    if tail.endswith("day"):
+                        digits = "".join(ch for ch in tail if ch.isdigit())
+                        if digits:
+                            attr_window = f"{digits}-day"
                 v.update({
                     "is_sig": data.get("stat_sig"),
                     "t_stat": data.get("CVR_T_STAT"),
                     "i_customers": data.get("iCustomers"),
                     "i_ttv": data.get("iTTV"),
                     "campaign_name": data.get("display_name", data.get("name", "")),
+                    "long_name": long_name,
                     "launch_date": data.get("CAMPAIGN_LAUNCH_DATE"),
                     "status": data.get("STATUS"),
                     "segment": data.get("segment"),
                     "channel": data.get("Campaign Canvas Channel"),
+                    "attribution_window": attr_window,
                 })
             if "required_n_per_arm" in data:
                 v.update({
@@ -722,6 +734,7 @@ def render_executive_report():
     status       = v.get("status")
     segment      = v.get("segment")
     channel      = v.get("channel")
+    attr_window  = v.get("attribution_window")
     days_to_sig  = v.get("days_to_sig")
     required_n   = v.get("required_n")
     roi_pct      = v.get("roi_pct")
@@ -782,6 +795,14 @@ def render_executive_report():
         if launch_date: meta_bits.append(f'📅 Launched <b style="color:#411260;">{launch_date}</b>')
         if segment:     meta_bits.append(f'🎯 {str(segment).replace("_"," ")}')
         if channel:     meta_bits.append(f'📡 {channel}')
+        if attr_window:
+            # Color-code: 1-day = strict (green), 3-day = looser (amber), 7+ = loose (red)
+            w_digits = "".join(ch for ch in attr_window if ch.isdigit())
+            w_int = int(w_digits) if w_digits else 3
+            w_color = "#1B7E4F" if w_int <= 1 else "#A55A00" if w_int <= 3 else "#B43A3A"
+            meta_bits.append(
+                f'⏱️ <b style="color:{w_color};">{attr_window}</b> attribution'
+            )
         meta_line = " &nbsp;·&nbsp; ".join(meta_bits)
 
         st.markdown(f"""
@@ -1103,10 +1124,19 @@ def render_executive_report():
                "#1B7E4F" if ic_val and ic_val > 0 else "#786D79")
     _stat_tile(impact_cols[1], ittv_label, ittv_display, ittv_sub,
                "#1B7E4F" if ittv_val and ittv_val > 0 else "#786D79")
+    # Attribution-aware cannibalization caption
+    cann_sub = "organic share of all conversions"
+    if cann is not None and attr_window:
+        w_digits = "".join(ch for ch in attr_window if ch.isdigit())
+        w_int = int(w_digits) if w_digits else 3
+        if w_int >= 3 and cann >= 0.5:
+            cann_sub = f"⚠️ {attr_window} window may inflate this — re-check"
+        elif w_int <= 1:
+            cann_sub = f"✓ strict {attr_window} window — read is reliable"
     _stat_tile(impact_cols[2], "Cannibalization",
                f"{cann*100:.1f}% ({incr_pct:.0f}% net-new)" if cann is not None and incr_pct else
                (f"{cann*100:.1f}%" if cann is not None else "—"),
-               "organic share of all conversions",
+               cann_sub,
                "#1B7E4F" if cann is not None and cann < 0.4 else
                "#A55A00" if cann is not None and cann < 0.6 else "#B43A3A")
     if roi_pct is not None or days_to_sig is None:
@@ -1615,8 +1645,11 @@ if st.session_state.active_scenario == "post":
             key=lambda c: c.get("CAMPAIGN_LAUNCH_DATE", ""), reverse=True,
         )
         _post_options = {
-            f"{c.get('display_name', '—')}  ·  +${(c.get('iTTV') or 0):,.0f} iTTV  ·  "
-            f"t={(c.get('CVR_T_STAT') or 0):.2f}  ·  {c.get('CAMPAIGN_LAUNCH_DATE', '—')}":
+            f"{c.get('display_name', '—')}  ·  "
+            f"{c.get('name', '—')}  ·  "
+            f"📅 {c.get('CAMPAIGN_LAUNCH_DATE', '—')}  ·  "
+            f"+${(c.get('iTTV') or 0):,.0f} iTTV  ·  "
+            f"t={(c.get('CVR_T_STAT') or 0):.2f}":
             c.get("CAMPAIGN_CANVAS_ID", "")
             for c in _post_candidates
         }
@@ -1703,8 +1736,10 @@ if st.session_state.active_scenario == "during":
             key=lambda c: c.get("CAMPAIGN_LAUNCH_DATE", ""), reverse=True,
         )
         _live_options = {
-            f"{c.get('display_name', '—')}  ·  t={(c.get('CVR_T_STAT') or 0):.2f}  ·  "
-            f"launched {c.get('CAMPAIGN_LAUNCH_DATE', '—')}":
+            f"{c.get('display_name', '—')}  ·  "
+            f"{c.get('name', '—')}  ·  "
+            f"📅 launched {c.get('CAMPAIGN_LAUNCH_DATE', '—')}  ·  "
+            f"t={(c.get('CVR_T_STAT') or 0):.2f}":
             c.get("CAMPAIGN_CANVAS_ID", "")
             for c in _live_candidates
         }
@@ -1789,7 +1824,10 @@ if st.session_state.active_scenario == "roi":
             key=lambda c: c.get("CAMPAIGN_LAUNCH_DATE", ""), reverse=True,
         )
         _roi_options = {
-            f"{c.get('display_name', '—')}  ·  {(c.get('segment') or 'BAU').replace('_', ' ')}  ·  "
+            f"{c.get('display_name', '—')}  ·  "
+            f"{c.get('name', '—')}  ·  "
+            f"📅 {c.get('CAMPAIGN_LAUNCH_DATE', '—')}  ·  "
+            f"{(c.get('segment') or 'BAU').replace('_', ' ')}  ·  "
             f"{c.get('TARGET_AUDIENCE') or 0:,} eligible":
             c.get("CAMPAIGN_CANVAS_ID", "")
             for c in _roi_candidates
