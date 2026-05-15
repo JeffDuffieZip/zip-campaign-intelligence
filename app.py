@@ -15,6 +15,7 @@ import streamlit as st
 from dotenv import load_dotenv
 
 from agent import stream_response
+from tools.mock_data import CAMPAIGNS
 
 load_dotenv()
 
@@ -513,6 +514,10 @@ if "pending_question" not in st.session_state:
     st.session_state.pending_question = None
 if "pre_mode" not in st.session_state:
     st.session_state.pre_mode = None   # None = chooser, "demo" = hard-coded, "new" = custom form
+if "post_mode" not in st.session_state:
+    st.session_state.post_mode = None  # None = chooser, "demo" = hard-coded, "pick" = picked campaign
+if "during_mode" not in st.session_state:
+    st.session_state.during_mode = None  # None = chooser, "demo" = hard-coded, "pick" = picked campaign
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -1113,14 +1118,18 @@ for col, sc in zip([c1, c2, c3, c4, c5], SCENARIOS):
     with col:
         active = "🔵 " if st.session_state.active_scenario == sc["id"] else ""
         if st.button(f"{sc['icon']} {active}{sc['stage']}: {sc['title']}", key=f"sc_{sc['id']}"):
-            if sc["id"] == "pre":
-                # PRE opens a chooser — don't fire the question yet
-                st.session_state.active_scenario = "pre"
-                st.session_state.pre_mode = None
+            if sc["id"] in ("pre", "post", "during"):
+                # Open a chooser — don't fire the question yet
+                st.session_state.active_scenario = sc["id"]
+                st.session_state.pre_mode    = None
+                st.session_state.post_mode   = None
+                st.session_state.during_mode = None
             else:
                 st.session_state.pending_question = sc["question"]
                 st.session_state.active_scenario  = sc["id"]
-                st.session_state.pre_mode = None
+                st.session_state.pre_mode    = None
+                st.session_state.post_mode   = None
+                st.session_state.during_mode = None
             st.rerun()
 
 # ── PRE-CAMPAIGN CHOOSER (shown when PRE button is active) ────────────────────
@@ -1257,6 +1266,183 @@ if st.session_state.active_scenario == "pre":
                 st.session_state.pending_question = question
                 st.session_state.pre_mode = "new"
                 st.rerun()
+
+# ── POST-CAMPAIGN CHOOSER (shown when POST button is active) ──────────────────
+if st.session_state.active_scenario == "post":
+    st.markdown("""
+    <div style="background:#FFFFFF;border:1px solid #D6D4D2;border-radius:12px;
+                padding:18px 22px;margin:10px 0 6px 0;">
+      <div class="eyebrow" style="margin-bottom:10px;">📊 Post-Campaign — choose your path</div>
+    </div>""", unsafe_allow_html=True)
+
+    demo_col, divider_col, pick_col = st.columns([5, 1, 6])
+
+    with demo_col:
+        st.markdown("""
+        <div style="background:#F5F4F2;border:1px solid #E1E0DF;border-radius:10px;
+                    padding:14px 16px;height:100%;">
+          <div style="font-size:0.8rem;font-weight:700;color:#1A0725;margin-bottom:4px;">
+            📋 App Deals — July 4th Demo
+          </div>
+          <div style="font-size:0.74rem;color:#786D79;line-height:1.5;">
+            Run the pre-loaded App Deals — July 4th scenario. Hand-crafted narrative
+            showing the SCALE recommendation with cannibalization analysis.
+          </div>
+        </div>""", unsafe_allow_html=True)
+        st.markdown("<div style='margin-top:10px;'></div>", unsafe_allow_html=True)
+        if st.button("▶ Run July 4th Demo", key="post_run_demo", use_container_width=True):
+            post_sc = next(s for s in SCENARIOS if s["id"] == "post")
+            st.session_state.pending_question = post_sc["question"]
+            st.session_state.post_mode = "demo"
+            st.rerun()
+
+    with divider_col:
+        st.markdown("""
+        <div style="display:flex;justify-content:center;align-items:center;height:100%;
+                    padding-top:20px;">
+          <div style="color:#D6D4D2;font-size:1.1rem;font-weight:300;">or</div>
+        </div>""", unsafe_allow_html=True)
+
+    with pick_col:
+        st.markdown("""
+        <div style="background:#EFE9FA;border:1px solid #6442BD;border-radius:10px;
+                    padding:14px 16px;">
+          <div style="font-size:0.8rem;font-weight:700;color:#411260;margin-bottom:4px;">
+            🔍 Pick a Recent Winner
+          </div>
+          <div style="font-size:0.74rem;color:#6442BD;line-height:1.5;">
+            Choose any completed campaign with a statistically significant positive lift —
+            the agent will build a full final-read report from the actual numbers.
+          </div>
+        </div>""", unsafe_allow_html=True)
+
+        # Build candidate list: completed + sig + positive iTTV, sorted recent first
+        _post_candidates = sorted(
+            [c for c in CAMPAIGNS
+             if (c.get("STATUS") or "completed").lower() == "completed"
+             and c.get("stat_sig") and (c.get("iTTV") or 0) > 0
+             and c.get("CVR_TARGET") and c.get("CVR_CONTROL")],
+            key=lambda c: c.get("CAMPAIGN_LAUNCH_DATE", ""), reverse=True,
+        )
+        _post_options = {
+            f"{c.get('display_name', '—')}  ·  +${(c.get('iTTV') or 0):,.0f} iTTV  ·  "
+            f"t={(c.get('CVR_T_STAT') or 0):.2f}  ·  {c.get('CAMPAIGN_LAUNCH_DATE', '—')}":
+            c.get("CAMPAIGN_CANVAS_ID", "")
+            for c in _post_candidates
+        }
+
+        with st.form("post_picker", clear_on_submit=False):
+            if _post_options:
+                picked = st.selectbox(
+                    "Which campaign do you want a final read on?",
+                    list(_post_options.keys()),
+                )
+                submitted_p = st.form_submit_button("📊 Generate final read →",
+                                                    use_container_width=True)
+                if submitted_p:
+                    cid = _post_options[picked]
+                    picked_name = picked.split("  ·  ")[0]
+                    question = (
+                        f"[POST_LOOKUP] Canvas: {cid}\n\n"
+                        f"Give me the final A/B read for **{picked_name}** — "
+                        f"include stat sig, incrementality, cannibalization, and recommendation."
+                    )
+                    st.session_state.pending_question = question
+                    st.session_state.post_mode = "pick"
+                    st.rerun()
+            else:
+                st.info("No completed-and-winning campaigns available in the current data.")
+                st.form_submit_button("📊 Generate final read →", disabled=True,
+                                      use_container_width=True)
+
+# ── DURING-CAMPAIGN CHOOSER (shown when DURING button is active) ──────────────
+if st.session_state.active_scenario == "during":
+    st.markdown("""
+    <div style="background:#FFFFFF;border:1px solid #D6D4D2;border-radius:12px;
+                padding:18px 22px;margin:10px 0 6px 0;">
+      <div class="eyebrow" style="margin-bottom:10px;">⏳ Mid-flight Check — choose your path</div>
+    </div>""", unsafe_allow_html=True)
+
+    demo_col, divider_col, pick_col = st.columns([5, 1, 6])
+
+    with demo_col:
+        st.markdown("""
+        <div style="background:#F5F4F2;border:1px solid #E1E0DF;border-radius:10px;
+                    padding:14px 16px;height:100%;">
+          <div style="font-size:0.8rem;font-weight:700;color:#1A0725;margin-bottom:4px;">
+            📋 App Deals — Jan 2025 Demo
+          </div>
+          <div style="font-size:0.74rem;color:#786D79;line-height:1.5;">
+            Run the pre-loaded App Deals — Jan 2025 Email scenario. Hand-crafted
+            STOP narrative showing the 608-days-to-significance problem.
+          </div>
+        </div>""", unsafe_allow_html=True)
+        st.markdown("<div style='margin-top:10px;'></div>", unsafe_allow_html=True)
+        if st.button("▶ Run Jan 2025 Demo", key="during_run_demo", use_container_width=True):
+            dur_sc = next(s for s in SCENARIOS if s["id"] == "during")
+            st.session_state.pending_question = dur_sc["question"]
+            st.session_state.during_mode = "demo"
+            st.rerun()
+
+    with divider_col:
+        st.markdown("""
+        <div style="display:flex;justify-content:center;align-items:center;height:100%;
+                    padding-top:20px;">
+          <div style="color:#D6D4D2;font-size:1.1rem;font-weight:300;">or</div>
+        </div>""", unsafe_allow_html=True)
+
+    with pick_col:
+        st.markdown("""
+        <div style="background:#EFE9FA;border:1px solid #6442BD;border-radius:10px;
+                    padding:14px 16px;">
+          <div style="font-size:0.8rem;font-weight:700;color:#411260;margin-bottom:4px;">
+            🔍 Check a Live Campaign
+          </div>
+          <div style="font-size:0.74rem;color:#6442BD;line-height:1.5;">
+            Pick any currently-running campaign — the agent calculates how far it is from
+            significance, days-to-sig, opportunity cost, and a SCALE/EXTEND/STOP call.
+          </div>
+        </div>""", unsafe_allow_html=True)
+
+        # Build live-campaign list
+        _live_candidates = sorted(
+            [c for c in CAMPAIGNS
+             if (c.get("STATUS") or "").lower() == "running"
+             and c.get("CVR_TARGET") and c.get("CVR_CONTROL")
+             and c.get("TARGET_AUDIENCE") and c.get("CONTROL_AUDIENCE")],
+            key=lambda c: c.get("CAMPAIGN_LAUNCH_DATE", ""), reverse=True,
+        )
+        _live_options = {
+            f"{c.get('display_name', '—')}  ·  t={(c.get('CVR_T_STAT') or 0):.2f}  ·  "
+            f"launched {c.get('CAMPAIGN_LAUNCH_DATE', '—')}":
+            c.get("CAMPAIGN_CANVAS_ID", "")
+            for c in _live_candidates
+        }
+
+        with st.form("during_picker", clear_on_submit=False):
+            if _live_options:
+                picked_l = st.selectbox(
+                    "Which live campaign should I check on?",
+                    list(_live_options.keys()),
+                )
+                submitted_l = st.form_submit_button("⏳ Run mid-flight check →",
+                                                    use_container_width=True)
+                if submitted_l:
+                    cid = _live_options[picked_l]
+                    picked_name = picked_l.split("  ·  ")[0]
+                    question = (
+                        f"[DURING_LOOKUP] Canvas: {cid}\n\n"
+                        f"Give me a mid-flight read for **{picked_name}** — "
+                        f"include current t-stat, distance to significance, days needed, "
+                        f"and a recommendation."
+                    )
+                    st.session_state.pending_question = question
+                    st.session_state.during_mode = "pick"
+                    st.rerun()
+            else:
+                st.info("No campaigns are currently running in the data.")
+                st.form_submit_button("⏳ Run mid-flight check →", disabled=True,
+                                      use_container_width=True)
 
 st.markdown("<hr>", unsafe_allow_html=True)
 

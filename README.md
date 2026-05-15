@@ -34,13 +34,13 @@ Then open [http://localhost:8501](http://localhost:8501).
 
 ### 💬 Campaign Analysis tab
 
-**Three pre-built demo scenarios:**
+**Three scenarios — each with a hard-coded demo AND a "pick your own campaign" option:**
 
-| Scenario | Campaign | What you see |
+| Scenario | Demo | Or pick from… |
 |---|---|---|
-| ✅ POST | App Deals — July 4th | Final A/B read · stat sig at 99% CI · SCALE recommendation |
-| ⏳ DURING | App Deals — Jan 2025 Email | Mid-flight check · t = 0.485 · 608 days to significance · STOP |
-| 📋 PRE | Best Buy New Purchasers | Pre-launch sizing **or** custom campaign sizer |
+| ✅ POST | App Deals — July 4th (SCALE narrative) | Any completed + significant + winning campaign → dynamic final read |
+| ⏳ DURING | App Deals — Jan 2025 Email (STOP narrative) | Any `STATUS = running` campaign → live mid-flight check with dynamic days-to-sig and SCALE/EXTEND/STOP recommendation |
+| 📋 PRE | Best Buy New Purchasers V3 sizing | Custom campaign sizer form (segment · population · lift · hypothesis · CI) |
 
 **Ad-hoc queries (type anything):**
 - Look up any of the 41 campaigns by name or Canvas UUID

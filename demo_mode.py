@@ -732,6 +732,235 @@ def _handle_custom_sizing(
     yield {"type": "done"}
 
 
+def _handle_post_lookup(c: dict) -> Generator[dict, None, None]:
+    """Dynamic POST scenario — final read for any user-picked completed campaign."""
+    stat = _two_proportion_z(c["CVR_TARGET"], c["CVR_CONTROL"],
+                              c["TARGET_AUDIENCE"], c["CONTROL_AUDIENCE"])
+    name    = c.get("display_name", c.get("name", "Campaign"))
+    segment = (c.get("segment") or "BAU").replace("_", " ")
+    channel = c.get("Campaign Canvas Channel", "EMAIL")
+    launch  = c.get("CAMPAIGN_LAUNCH_DATE", "—")
+
+    enriched = {
+        **stat,
+        "campaign_name": name,
+        "i_customers": c.get("iCustomers"),
+        "i_ttv": c.get("iTTV"),
+        "cannibalization_rate": c.get("CANNIBALIZATION_RATE"),
+        "recommendation": "SCALE",
+    }
+    yield from _tool_call("get_campaign_details", {"campaign_name": name}, c)
+    yield from _tool_call("calculate_stat_sig", {
+        "p_control": c["CVR_CONTROL"], "p_treatment": c["CVR_TARGET"],
+        "current_n_control": c["CONTROL_AUDIENCE"],
+        "current_n_treatment": c["TARGET_AUDIENCE"],
+    }, enriched)
+
+    results_table = _ab_results_table(
+        n_t=c["TARGET_AUDIENCE"], cvr_t=c["CVR_TARGET"],
+        n_c=c["CONTROL_AUDIENCE"], cvr_c=c["CVR_CONTROL"],
+        t_stat=stat["t_statistic"], conf=stat["confidence_label"],
+        is_sig=stat["is_significant"],
+        i_customers=c.get("iCustomers"), i_ttv=c.get("iTTV"),
+        cann=c.get("CANNIBALIZATION_RATE"), stage="post",
+    )
+
+    raw_conv = int(c["CVR_TARGET"] * c["TARGET_AUDIENCE"])
+    icust    = c.get("iCustomers") or 0
+    ittv     = c.get("iTTV") or 0
+    cann     = c.get("CANNIBALIZATION_RATE") or 0
+    incr_pct = (icust / raw_conv * 100) if raw_conv else 0
+
+    if cann >= 0.6:
+        cann_note = (f"high — typical for an engaged {segment} segment that would have "
+                     f"converted anyway")
+    elif cann >= 0.4:
+        cann_note = "mixed — the incentive partly rewards organic behaviour"
+    elif cann > 0:
+        cann_note = "low — majority of conversions are genuinely incremental"
+    else:
+        cann_note = "not reported for this campaign"
+
+    similar = find_similar_campaigns(c, k=3, min_score=5)
+    toc_items = [
+        "1 · 📊 Final A/B Results",
+        "2 · 💎 What's Actually Incremental",
+        "3 · 📌 Recommendation",
+        "4 · 🔁 Historical Analogs" if similar else None,
+    ]
+    toc_line = " · ".join(x for x in toc_items if x)
+
+    narrative = (
+        f"## ✅ {name}: Statistically Significant. SCALE.\n\n"
+        f"*Segment: {segment} · Channel: {channel} · Launched: {launch}*\n\n"
+        f"📑 **What's in this report:** {toc_line}\n\n"
+        f"---\n\n"
+        f"### 1 · 📊 Final A/B Results\n\n"
+        f"{results_table}"
+        f"---\n\n"
+        f"### 2 · 💎 What's Actually Incremental\n\n"
+        f"Raw conversions in the target arm: **{raw_conv:,}**. But only "
+        f"**{icust:,} of those ({incr_pct:.0f}%) were truly incremental** — the rest "
+        f"would have purchased anyway. This is the gap most campaign reports miss.\n\n"
+        f"- Incremental customers: **+{icust:,}**\n"
+        f"- Incremental TTV: **+${ittv:,.0f}**\n"
+        f"- Cannibalization rate: **{cann*100:.1f}%** — {cann_note}\n\n"
+        f"---\n\n"
+        f"### 3 · 📌 Recommendation — SCALE\n\n"
+        f"The lift is real at {stat['confidence_label']} confidence and the incremental "
+        f"revenue is **+${ittv:,.0f}**. Rebuild this exact creative + audience + "
+        f"send-time recipe for the next comparable window — we have a "
+        f"**{segment}** playbook here worth productionising."
+    )
+
+    if similar:
+        top = similar[0]
+        narrative += (
+            f"\n\n---\n\n"
+            f"### 4 · 🔁 Historical Analogs\n\n"
+            f"**Closest analog:** *{top['name']}* "
+            f"(Canvas ID `{top['canvas_id'][:8]}…` · "
+            f"iTTV ${(top['campaign'].get('iTTV') or 0):+,.0f}).\n"
+        )
+        narrative += similar_summary_markdown(similar)
+
+    yield from _stream_text(narrative)
+    yield {"type": "done"}
+
+
+def _handle_during_lookup(c: dict) -> Generator[dict, None, None]:
+    """Dynamic DURING scenario — mid-flight read for any user-picked live campaign."""
+    from scipy.stats import norm
+    import math
+
+    stat = _two_proportion_z(c["CVR_TARGET"], c["CVR_CONTROL"],
+                              c["TARGET_AUDIENCE"], c["CONTROL_AUDIENCE"])
+    name    = c.get("display_name", c.get("name", "Campaign"))
+    segment = (c.get("segment") or "BAU").replace("_", " ")
+    channel = c.get("Campaign Canvas Channel", "EMAIL")
+    launch  = c.get("CAMPAIGN_LAUNCH_DATE", "—")
+
+    p_c, p_t = c["CVR_CONTROL"], c["CVR_TARGET"]
+    n_c, n_t = c["CONTROL_AUDIENCE"], c["TARGET_AUDIENCE"]
+    t_stat   = stat["t_statistic"] or 0.0
+    is_sig   = stat["is_significant"]
+    abs_t    = abs(t_stat)
+    delta    = p_t - p_c
+    days_running = c.get("DAYS_RUNNING", 14)
+
+    # Compute required N per arm + days to detect the current observed effect
+    if delta > 0:
+        z_a, z_b = norm.ppf(0.975), norm.ppf(0.80)
+        p_avg = (p_c + p_t) / 2
+        num = (z_a * math.sqrt(2 * p_avg * (1 - p_avg))
+               + z_b * math.sqrt(p_c * (1 - p_c) + p_t * (1 - p_t))) ** 2
+        n_required = math.ceil(num / delta ** 2)
+        additional_per_arm = max(0, n_required - min(n_t, n_c))
+        daily_per_arm = max(1, min(n_t, n_c) / max(days_running, 1))
+        days_needed = math.ceil(additional_per_arm / daily_per_arm) if additional_per_arm else 0
+        scale_factor = n_required / max(min(n_t, n_c), 1)
+    else:
+        n_required = None
+        days_needed = None
+        scale_factor = None
+
+    # Branching recommendation based on actual t-stat
+    if is_sig and t_stat > 0:
+        rec, rec_emoji = "SCALE", "🟢"
+        rec_line = (f"You're already past significance. **Lock this in** — extend the audience "
+                    f"or replicate the recipe immediately.")
+    elif delta < 0:
+        rec, rec_emoji = "RETHINK", "🔴"
+        rec_line = (f"Control is beating target. The current creative is hurting conversions — "
+                    f"**stop and revise** before more audience burns through.")
+    elif abs_t < 0.8:
+        rec, rec_emoji = "STOP", "🔴"
+        rec_line = (f"Signal too weak. At |t|={abs_t:.2f}, more time won't fix this. "
+                    f"**Kill the test** and redirect the audience.")
+    elif abs_t >= 1.5:
+        rec, rec_emoji = "EXTEND", "🔵"
+        rec_line = (f"You're trending toward significance (|t|={abs_t:.2f}). "
+                    f"**Extend by ~{days_needed} days** to confirm.")
+    else:
+        rec, rec_emoji = "WATCH", "🟡"
+        rec_line = (f"Mid-band signal (|t|={abs_t:.2f}). Hold for another 7 days, then re-check.")
+
+    enriched = {
+        **stat, "campaign_name": name,
+        "i_customers": int(delta * n_t) if delta > 0 else 0,
+        "days_to_sig": days_needed,
+        "recommendation": rec,
+    }
+    yield from _tool_call("get_campaign_details", {"campaign_name": name}, c)
+    yield from _tool_call("calculate_stat_sig", {
+        "p_control": p_c, "p_treatment": p_t,
+        "current_n_control": n_c, "current_n_treatment": n_t,
+        "days_running": days_running,
+    }, enriched)
+
+    results_table = _ab_results_table(
+        n_t=n_t, cvr_t=p_t, n_c=n_c, cvr_c=p_c,
+        t_stat=t_stat, conf=stat["confidence_label"], is_sig=is_sig,
+        days_running=days_running, stage="during",
+    )
+
+    if delta > 0 and not is_sig:
+        wwit_block = (
+            f"At the current effect size (+{delta*100:.3f} pp), reaching 95% confidence requires "
+            f"**~{n_required:,} users per arm** ({scale_factor:.1f}× the current sample). "
+            f"That's roughly **{days_needed} more days** at the current daily entry rate.\n\n"
+        )
+    elif delta <= 0:
+        wwit_block = (
+            f"Treatment is currently **{abs(delta)*100:.3f} pp below** control. No amount of "
+            f"additional audience flips this into a winning test in its current form.\n\n"
+        )
+    else:
+        wwit_block = "Already past the 95% threshold — no additional audience needed.\n\n"
+
+    similar = find_similar_campaigns(c, k=3, min_score=5)
+    toc_items = [
+        "1 · 📊 Mid-flight A/B Results",
+        "2 · ⚠️ What Would It Take?",
+        "3 · 📌 Recommendation",
+        "4 · 🔁 Comparable Past Campaigns" if similar else None,
+    ]
+    toc_line = " · ".join(x for x in toc_items if x)
+
+    narrative = (
+        f"## {rec_emoji} {name}: Mid-flight Read\n\n"
+        f"*Segment: {segment} · Channel: {channel} · Launched: {launch} · "
+        f"~{days_running} days running*\n\n"
+        f"📑 **What's in this report:** {toc_line}\n\n"
+        f"---\n\n"
+        f"### 1 · 📊 Mid-flight A/B Results\n\n"
+        f"{results_table}"
+        f"T-statistic of **{t_stat:.3f}** — needs **1.96** for 95% confidence.\n\n"
+        f"---\n\n"
+        f"### 2 · ⚠️ What Would It Take?\n\n"
+        f"{wwit_block}"
+        f"---\n\n"
+        f"### 3 · 📌 Recommendation — {rec}\n\n"
+        f"{rec_line}"
+    )
+
+    if similar:
+        narrative += f"\n\n---\n\n### 4 · 🔁 Comparable Past Campaigns\n\n"
+        winners = [m for m in similar if (m["campaign"].get("iTTV") or 0) > 0]
+        if winners:
+            top = winners[0]
+            narrative += (
+                f"**Strongest historical comparable:** *{top['name']}* "
+                f"(Canvas ID `{top['canvas_id'][:8]}…` · iTTV "
+                f"**${(top['campaign'].get('iTTV') or 0):+,.0f}**). "
+                f"Use it as your benchmark for what 'good' looks like.\n"
+            )
+        narrative += similar_summary_markdown(similar)
+
+    yield from _stream_text(narrative)
+    yield {"type": "done"}
+
+
 # ── Intent detection & ad-hoc handlers ─────────────────────────────────────────
 
 
@@ -1689,6 +1918,40 @@ def stream_demo_response(messages: list[dict]) -> Generator[dict, None, None]:
         yield from _handle_custom_sizing(
             camp_name, seg_key, pop_val, lift_val, base_cvr, hypothesis, conf_pct
         )
+        return
+
+    # 0b. POST lookup (from the POST 'Pick a Recent Winner' dropdown)
+    if "[post_lookup]" in text_lower:
+        cid_m = re.search(r"canvas:\s*([a-f0-9-]+)", text, re.IGNORECASE)
+        target = None
+        if cid_m:
+            cid = cid_m.group(1).lower()
+            target = next(
+                (c for c in CAMPAIGNS
+                 if (c.get("CAMPAIGN_CANVAS_ID") or "").lower() == cid),
+                None,
+            )
+        if target:
+            yield from _handle_post_lookup(target)
+        else:
+            yield from _handle_generic(text)
+        return
+
+    # 0c. DURING lookup (from the DURING 'Check a Live Campaign' dropdown)
+    if "[during_lookup]" in text_lower:
+        cid_m = re.search(r"canvas:\s*([a-f0-9-]+)", text, re.IGNORECASE)
+        target = None
+        if cid_m:
+            cid = cid_m.group(1).lower()
+            target = next(
+                (c for c in CAMPAIGNS
+                 if (c.get("CAMPAIGN_CANVAS_ID") or "").lower() == cid),
+                None,
+            )
+        if target:
+            yield from _handle_during_lookup(target)
+        else:
+            yield from _handle_generic(text)
         return
 
     # 1. Comparison takes priority over scenario detection
