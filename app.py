@@ -796,20 +796,20 @@ def render_executive_report():
         {_tldr_line()}
       </div>
       <div style="color:#6442BD;font-size:0.7rem;margin-top:10px;letter-spacing:0.3px;">
-        📑 Below: 1 · Statistical Results &nbsp;·&nbsp; 2 · Business Impact &nbsp;·&nbsp;
-        3 · Strategic Alignment &nbsp;·&nbsp; 4 · Recommended Next Steps &nbsp;·&nbsp;
+        📑 Below: 1 · {"Test Design" if stage == "Pre-Campaign" else "Mid-Flight Read" if stage == "During Campaign" else "Statistical Results"} &nbsp;·&nbsp;
+        2 · {"Projected Impact" if stage == "Pre-Campaign" else "Live Impact (so far)" if stage == "During Campaign" else "Business Impact"} &nbsp;·&nbsp;
+        3 · Strategic Alignment &nbsp;·&nbsp; 4 · {"Launch Playbook" if stage == "Pre-Campaign" else "Mid-Flight Playbook" if stage == "During Campaign" else "Recommended Next Steps"} &nbsp;·&nbsp;
         5 · Plain-English Explainer
       </div>
     </div>""", unsafe_allow_html=True)
 
-    # ── Section 1: Statistical results ───────────────────────────────────────
-    st.markdown('<div class="eyebrow" style="margin-bottom:8px;">1 · Statistical Results</div>',
+    # ── Section 1: Stage-specific stats ───────────────────────────────────────
+    sec1_title = ("1 · Test Design" if stage == "Pre-Campaign"
+                  else "1 · Mid-Flight Read" if stage == "During Campaign"
+                  else "1 · Statistical Results")
+    st.markdown(f'<div class="eyebrow" style="margin-bottom:8px;">{sec1_title}</div>',
                 unsafe_allow_html=True)
 
-    sig_color = "#1B7E4F" if is_sig else ("#B43A3A" if is_sig is False else "#786D79")
-    sig_label = "🟢 SIGNIFICANT" if is_sig else ("🔴 NOT YET SIG" if is_sig is False else "🟡 SIZING MODE")
-
-    stat_cols = st.columns(4)
     def _stat_tile(col, label, value, sub="", color="#1A0725"):
         col.markdown(f"""
         <div class="metric-box">
@@ -818,19 +818,69 @@ def render_executive_report():
           <div class="metric-sub">{sub}</div>
         </div>""", unsafe_allow_html=True)
 
-    _stat_tile(stat_cols[0], "Significance", sig_label, "two-proportion Z-test", sig_color)
-    _stat_tile(stat_cols[1], "T-Statistic",
-               f"{t_stat:.3f}" if t_stat is not None else "—",
-               "need |t| > 1.96 for 95% CI",
-               "#1B7E4F" if t_stat and abs(t_stat) >= 1.96 else ("#A55A00" if t_stat else "#786D79"))
-    _stat_tile(stat_cols[2], "Confidence Level",
-               confidence or (f"~{int(min(99,max(50,abs(t_stat or 0)*40)))}%" if t_stat else "—"),
-               "of a real incremental effect")
-    _stat_tile(stat_cols[3], "Recommendation",
-               rec or "—", "based on t-stat + cannibalization",
-               "#1B7E4F" if rec in ("SCALE","GREENLIGHT") else
-               ("#A55A00" if rec in ("EXTEND","ITERATE","WATCH") else
-                "#B43A3A" if rec in ("RETHINK","STOP") else "#6442BD"))
+    stat_cols = st.columns(4)
+
+    if stage == "Pre-Campaign":
+        # PRE: power-analysis-first tiles — design feasibility, not significance
+        _stat_tile(stat_cols[0], "Test Status", "🟡 SIZING",
+                   "pre-launch power analysis", "#6442BD")
+        _stat_tile(stat_cols[1], "Required N / Arm",
+                   f"{required_n:,}" if required_n is not None else "—",
+                   "for 80% power at 95% CI",
+                   "#6442BD" if required_n else "#786D79")
+        _stat_tile(stat_cols[2], "Days to Significance",
+                   str(days_to_sig) if days_to_sig is not None else "—",
+                   "at current daily entry rate",
+                   "#1B7E4F" if (days_to_sig and days_to_sig <= 30) else
+                   "#A55A00" if (days_to_sig and days_to_sig <= 60) else
+                   "#B43A3A" if days_to_sig else "#786D79")
+        _stat_tile(stat_cols[3], "Verdict",
+                   rec or "SIZE_AND_LAUNCH",
+                   "🟢 YES — DO IT · 🟡 DOABLE · 🔴 RETHINK",
+                   "#1B7E4F" if rec in ("SCALE", "GREENLIGHT", "SIZE_AND_LAUNCH") else
+                   "#A55A00" if rec in ("EXTEND", "WATCH") else
+                   "#B43A3A" if rec in ("RETHINK", "STOP") else "#6442BD")
+
+    elif stage == "During Campaign":
+        # DURING: progress-to-significance framing
+        pct_to_sig = min(100, (abs(t_stat or 0) / 1.96) * 100) if t_stat is not None else None
+        _stat_tile(stat_cols[0], "Test Status", "📡 IN FLIGHT",
+                   "live mid-campaign read", "#A55A00")
+        _stat_tile(stat_cols[1], "Current T-Statistic",
+                   f"{t_stat:.3f}" if t_stat is not None else "—",
+                   "needs |t| > 1.96 for 95% CI",
+                   "#1B7E4F" if t_stat and abs(t_stat) >= 1.96 else
+                   "#A55A00" if t_stat and abs(t_stat) >= 1.0 else "#B43A3A")
+        _stat_tile(stat_cols[2], "Progress to Sig",
+                   f"{pct_to_sig:.0f}%" if pct_to_sig is not None else "—",
+                   f"~{days_to_sig} more days needed" if days_to_sig else "of the way to 95% CI",
+                   "#1B7E4F" if pct_to_sig and pct_to_sig >= 100 else
+                   "#A55A00" if pct_to_sig and pct_to_sig >= 50 else "#B43A3A")
+        _stat_tile(stat_cols[3], "Mid-Flight Call",
+                   rec or "—", "SCALE · EXTEND · STOP · WATCH",
+                   "#1B7E4F" if rec == "SCALE" else
+                   "#A55A00" if rec in ("EXTEND", "WATCH", "ITERATE") else
+                   "#B43A3A" if rec in ("STOP", "RETHINK") else "#6442BD")
+
+    else:  # Post-Campaign
+        sig_color = ("#1B7E4F" if is_sig else
+                     "#B43A3A" if is_sig is False else "#786D79")
+        sig_label = ("🟢 SIGNIFICANT" if is_sig else
+                     "🔴 NOT SIGNIFICANT" if is_sig is False else "🟡 N/A")
+        _stat_tile(stat_cols[0], "Significance", sig_label, "two-proportion Z-test", sig_color)
+        _stat_tile(stat_cols[1], "T-Statistic",
+                   f"{t_stat:.3f}" if t_stat is not None else "—",
+                   "need |t| > 1.96 for 95% CI",
+                   "#1B7E4F" if t_stat and abs(t_stat) >= 1.96 else
+                   ("#A55A00" if t_stat else "#786D79"))
+        _stat_tile(stat_cols[2], "Confidence Level",
+                   confidence or (f"~{int(min(99,max(50,abs(t_stat or 0)*40)))}%" if t_stat else "—"),
+                   "of a real incremental effect")
+        _stat_tile(stat_cols[3], "Recommendation",
+                   rec or "—", "based on t-stat + cannibalization",
+                   "#1B7E4F" if rec in ("SCALE", "GREENLIGHT") else
+                   "#A55A00" if rec in ("EXTEND", "ITERATE", "WATCH") else
+                   "#B43A3A" if rec in ("RETHINK", "STOP") else "#6442BD")
 
     # ── Derived metrics (used across sections 2–4) ────────────────────────────
     ic_val    = i_customers if i_customers is not None else exp_ic
@@ -849,9 +899,12 @@ def render_executive_report():
     exp_ittv_str  = f"${exp_ittv:,.0f}"        if exp_ittv is not None else "—"
 
     # ── Visual Dashboard (gauge + incrementality donut) ───────────────────────
-    if PLOTLY_OK and (t_stat is not None or (ic_val and cann is not None)):
+    if PLOTLY_OK and (t_stat is not None or (ic_val and cann is not None) or (exp_ic and required_n)):
+        viz_title = ("📊 Pre-Launch Visuals" if stage == "Pre-Campaign"
+                     else "📊 Mid-Flight Visuals" if stage == "During Campaign"
+                     else "📊 Post-Campaign Visuals")
         st.markdown(
-            '<div class="eyebrow" style="margin:18px 0 8px 0;">📊 Visual Dashboard</div>',
+            f'<div class="eyebrow" style="margin:18px 0 8px 0;">{viz_title}</div>',
             unsafe_allow_html=True,
         )
         viz_l, viz_r = st.columns(2)
@@ -980,8 +1033,11 @@ def render_executive_report():
                     unsafe_allow_html=True,
                 )
 
-    # ── Section 2: Business impact ────────────────────────────────────────────
-    st.markdown('<div class="eyebrow" style="margin:18px 0 8px 0;">2 · Business Impact</div>',
+    # ── Section 2: Business impact (stage-aware label) ────────────────────────
+    sec2_title = ("2 · Projected Impact" if stage == "Pre-Campaign"
+                  else "2 · Live Impact (so far)" if stage == "During Campaign"
+                  else "2 · Business Impact")
+    st.markdown(f'<div class="eyebrow" style="margin:18px 0 8px 0;">{sec2_title}</div>',
                 unsafe_allow_html=True)
 
     impact_cols = st.columns(4)
@@ -1080,8 +1136,11 @@ def render_executive_report():
     goal_html += "</div>"
     st.markdown(goal_html, unsafe_allow_html=True)
 
-    # ── Section 4: Data-driven next steps ─────────────────────────────────────
-    st.markdown('<div class="eyebrow" style="margin:18px 0 8px 0;">4 · Recommended Next Steps</div>',
+    # ── Section 4: Stage-aware playbook ───────────────────────────────────────
+    sec4_title = ("4 · Launch Playbook" if stage == "Pre-Campaign"
+                  else "4 · Mid-Flight Playbook" if stage == "During Campaign"
+                  else "4 · Recommended Next Steps")
+    st.markdown(f'<div class="eyebrow" style="margin:18px 0 8px 0;">{sec4_title}</div>',
                 unsafe_allow_html=True)
 
     # Generate steps with actual numbers
