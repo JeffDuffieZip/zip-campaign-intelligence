@@ -1574,13 +1574,38 @@ def _handle_roi_matrix(
         )
     tier_cards = tier_detail_rows  # kept same var name for use in narrative below
 
-    narrative = f"""### ROI Planning Matrix — All CVR Tiers
+    net_per_conv = avg_order_value * ntm_margin - incentive_cost
+    narrative = f"""## 📊 ROI Planning Matrix
 
-**AOV:** ${avg_order_value:.2f} · **NTM Margin:** {ntm_margin*100:.1f}% · **Incentive:** ${incentive_cost:.0f}/conversion · **Fixed ROI:** {fixed_roi:.1f}%
+*All CVR tiers · 10% relative lift target · 95% CI · 80% power*
+
+📑 **What's in this report:** 1 · 💡 TL;DR · 2 · 💰 Unit Economics · 3 · 📊 Tier Comparison · 4 · 🔍 Tier Detail · 5 · 🎯 How to Pick Your Tier
 
 ---
 
-#### Tier Comparison (10% relative lift target, 95% CI, 80% power)
+### 1 · 💡 TL;DR
+
+> Every Zip incentive returns **${net_per_conv:.2f} net margin per incremental conversion** — a **{fixed_roi:.1f}% ROI** that holds at every CVR level. The CVR tier you pick changes **how fast** you read out and **how much** total NTM you book — not the per-dollar return.
+>
+> ⭐ **Best scenario right now:** **{best['label']}** — books **${best['ntm']:,.0f} in NTM** in **{best['days']} days**.
+
+---
+
+### 2 · 💰 Unit Economics — Why ROI Is Constant
+
+```
+   $10 incentive  ─►  1 incremental conversion  ─►  ${avg_order_value:.2f} TTV  ─►  ${avg_order_value * ntm_margin:.2f} NTM
+                                                                              minus $10 cost
+                                                                              = ${net_per_conv:.2f} net margin
+
+        ROI = (${avg_order_value:.2f} × {ntm_margin*100:.1f}% ÷ ${incentive_cost:.0f}) − 1 = {fixed_roi:.1f}%
+```
+
+ROI depends only on unit economics, not on how many people convert. Higher-CVR segments hit significance faster (smaller sample needed) but each conversion is still worth the same **${net_per_conv:.2f}** net.
+
+---
+
+### 3 · 📊 Tier Comparison
 
 | Segment Tier | Population | Min N/Arm | Days to Sig | Cost | Expected TTV | NTM Increase | ROI |
 |---|---|---|---|---|---|---|---|
@@ -1589,26 +1614,150 @@ def _handle_roi_matrix(
 
 ---
 
-#### Tier Detail
+### 4 · 🔍 Tier Detail
 
 | Tier | Segment | Population | CVR (Base → Target) | N/Arm | Days | Conversions | Cost | TTV | NTM | ROI |
 |---|---|---|---|---|---|---|---|---|---|---|
 {tier_cards}
+
 ---
 
-#### Why ROI is constant at {fixed_roi:.1f}% across all tiers
+### 5 · 🎯 How to Pick Your Tier
 
-ROI depends only on unit economics — not on how many people convert:
+| Priority | Pick | Why |
+|---|---|---|
+| 🏃 **Speed** matters most | **Highest CVR tier** | Smaller sample → faster read |
+| 💰 **Scale** matters most | **Largest eligible population** | More NTM at the same ROI |
+| 🎯 **Confidence** matters most | **Highest CVR baseline** | Cleaner signal, fewer false negatives |
+| 💸 **Lowest spend** | **Smallest tier that still passes power** | Cheapest test, slowest read |
+"""
+    yield from _stream_text(narrative)
+    yield {"type": "done"}
 
-> **ROI = (AOV × NTM margin ÷ incentive cost) − 1**
-> = (${avg_order_value:.2f} × {ntm_margin*100:.1f}% ÷ ${incentive_cost:.0f}) − 1 = **{fixed_roi:.1f}%**
 
-Every incremental conversion at any CVR level returns the same margin. The CVR tier affects **speed** (days to significance) and **scale** (total NTM), not the per-conversion ROI.
+def _handle_roi_lookup(c: dict) -> Generator[dict, None, None]:
+    """Dynamic ROI breakdown for any user-picked campaign.
 
-**Choose your tier based on:**
-- 🏃 **Speed**: Higher CVR → smaller sample needed → faster read
-- 💰 **Scale**: Larger eligible population → more NTM at the same ROI
-- 🎯 **Confidence**: Higher CVR baseline → signal is easier to detect cleanly
+    Computes cost / TTV / NTM / days at the campaign's actual audience and
+    segment baseline, plus a lift sensitivity table (5/10/15/20%).
+    """
+    from tools.stats import required_sample_size
+    import math
+
+    name    = c.get("display_name", c.get("name", "Campaign"))
+    segment = c.get("segment") or "BAU"
+    seg_str = segment.replace("_", " ")
+    channel = c.get("Campaign Canvas Channel", "EMAIL")
+
+    AOV          = 126.50
+    NTM_MARGIN   = 0.4144
+    INCENTIVE    = 10.0
+    NET_PER_CONV = AOV * NTM_MARGIN - INCENTIVE          # $42.42
+    FIXED_ROI    = (AOV * NTM_MARGIN / INCENTIVE - 1) * 100  # 424.3%
+
+    # Anchor: prefer the campaign's recorded control CVR, else segment baseline
+    p_base = c.get("CVR_CONTROL") or SEGMENT_BASELINES.get(segment, {}).get("avg_cvr", 0.05)
+    pop    = c.get("TARGET_AUDIENCE") or 100_000
+
+    yield from _tool_call("get_campaign_details", {"campaign_name": name}, c)
+
+    # ── Sensitivity table across lift scenarios ───────────────────────────────
+    lifts = [5, 10, 15, 20]
+    rows  = []
+    best  = None
+    for L in lifts:
+        p_t   = p_base * (1 + L / 100)
+        n_arm = required_sample_size(p_base, p_t)
+        daily = max(1, pop / 30)
+        days  = max(1, math.ceil((n_arm * 2) / daily))
+        conv  = round(pop * p_t)
+        cost  = round(conv * INCENTIVE)
+        ttv   = round(conv * AOV)
+        ntm   = round(ttv * NTM_MARGIN)
+        i_cust = round((p_t - p_base) * n_arm)
+        i_ttv  = round(i_cust * AOV)
+        pool_pct = round((n_arm * 2) / pop * 100, 1)
+        feasible = pool_pct <= 100
+        score = ntm / max(days, 1) if feasible else -1
+        row = {"lift": L, "p_t": p_t, "n_arm": n_arm, "days": days,
+               "conv": conv, "cost": cost, "ttv": ttv, "ntm": ntm,
+               "i_cust": i_cust, "i_ttv": i_ttv, "pool_pct": pool_pct,
+               "feasible": feasible, "score": score}
+        rows.append(row)
+        if best is None or score > best["score"]:
+            best = row
+
+    sensitivity_rows = ""
+    for r in rows:
+        star = " ⭐" if r is best else ""
+        verdict = ("🟢 GO" if r["feasible"] and r["days"] <= 30
+                   else "🟡 SLOW" if r["feasible"]
+                   else "🔴 NO")
+        sensitivity_rows += (
+            f"| **+{r['lift']}%{star}** | {r['p_t']*100:.2f}% | "
+            f"{r['n_arm']:,} | {r['pool_pct']:.0f}% | {r['days']}d | "
+            f"+{r['i_cust']:,} | +${r['i_ttv']:,} | ${r['ntm']:,} | {verdict} |\n"
+        )
+
+    yield from _tool_call("roi_matrix",
+                          {"mode": "campaign_specific",
+                           "campaign_name": name, "segment": segment,
+                           "baseline_cvr": round(p_base, 5),
+                           "audience": pop},
+                          {"fixed_roi_pct": FIXED_ROI,
+                           "net_per_conversion": NET_PER_CONV,
+                           "best_lift_pct": best["lift"],
+                           "best_ntm": best["ntm"], "best_days": best["days"]})
+
+    narrative = f"""## 📊 ROI Breakdown — {name}
+
+*Segment: {seg_str} · Channel: {channel} · Audience: {pop:,} · Baseline CVR: {p_base*100:.2f}%*
+
+📑 **What's in this report:** 1 · 💡 TL;DR · 2 · 💰 Unit Economics · 3 · 📊 Lift Sensitivity · 4 · 🎯 Recommendation
+
+---
+
+### 1 · 💡 TL;DR
+
+> At your audience and baseline, every incremental conversion returns **${NET_PER_CONV:.2f} net margin** — a **{FIXED_ROI:.1f}% ROI**.
+>
+> ⭐ **Best play:** a **+{best['lift']}% lift** target — books **+${best['i_ttv']:,} iTTV** and **${best['ntm']:,} NTM** in ~**{best['days']} days**.
+
+---
+
+### 2 · 💰 Unit Economics — Why ROI Is Constant
+
+```
+   ${INCENTIVE:.0f} incentive  ─►  1 incremental conversion  ─►  ${AOV:.2f} TTV  ─►  ${AOV * NTM_MARGIN:.2f} NTM
+                                                                            minus ${INCENTIVE:.0f} cost
+                                                                            = ${NET_PER_CONV:.2f} net margin
+
+        ROI = (${AOV:.2f} × {NTM_MARGIN*100:.1f}% ÷ ${INCENTIVE:.0f}) − 1 = {FIXED_ROI:.1f}%
+```
+
+Every incremental conversion this campaign produces is worth the same **${NET_PER_CONV:.2f}** net. The lift target you choose changes how **fast** you read (sample needed) and how much **total** NTM you book — not the per-dollar return.
+
+---
+
+### 3 · 📊 Lift Sensitivity
+
+| Lift Target | Target CVR | N/Arm | Pool | Days to Sig | iCustomers | iTTV | NTM | Verdict |
+|---|---|---|---|---|---|---|---|---|
+{sensitivity_rows}
+> ⭐ marks the best **NTM-per-day** scenario that's still feasible against your {pop:,}-person pool.
+
+---
+
+### 4 · 🎯 Recommendation
+
+For **{name}**, target a **+{best['lift']}% lift** at the **{p_base*100:.2f}% baseline**. Expect:
+
+- **+{best['i_cust']:,} incremental customers**
+- **+${best['i_ttv']:,} incremental TTV**
+- **${best['ntm']:,} NTM contribution**
+- Read in **~{best['days']} days** at the current entry rate
+
+If +{best['lift']}% feels ambitious, drop to **+{lifts[0]}%** for a safer floor. If you have headroom and the segment has shown bigger wins historically, **+{lifts[-1]}%** doubles the iCustomers projection.
 """
     yield from _stream_text(narrative)
     yield {"type": "done"}
@@ -1724,6 +1873,8 @@ ROI = (AOV × NTM_margin / incentive_cost) − 1
 
 #### 5. Decision Framework — When to SCALE, EXTEND, STOP
 
+**Post-campaign verdicts (after results are in):**
+
 | Recommendation | When | Action |
 |---|---|---|
 | 🟢 **SCALE** | Stat sig positive + cannibalization < 40% | Roll out to full segment |
@@ -1733,6 +1884,61 @@ ROI = (AOV × NTM_margin / incentive_cost) − 1
 | 🟡 **WATCH** | Sig but cannibalization 40–60% | Monitor before scaling |
 | 🔴 **RETHINK** | Stat sig *negative* | Campaign hurt conversions — investigate |
 | 🔴 **STOP** | \|t\| < 0.8 after large sample | No signal — reallocate budget |
+
+**Pre-launch verdicts (sizing a new campaign):**
+
+| Recommendation | When | Action |
+|---|---|---|
+| 🟢 **YES — DO IT** | Pool coverage ≤ 80% + days to sig ≤ 30 | Launch when ready — well-powered |
+| 🟡 **DOABLE** | Pool 80–100% or days to sig 30–60 | Feasible but tight — launch only if no faster alternative |
+| 🔴 **RETHINK** | Pool > 100% or days to sig > 60 | Broaden audience, lower confidence bar, or pick a higher-lift segment |
+
+---
+
+#### 6. Reality Check — Grounding Hypotheses in History
+
+Before any pre-launch sizing, the agent compares your **requested lift hypothesis** against the actual lifts achieved in past campaigns for the same segment. This catches over-optimistic plans before they consume budget.
+
+The agent rates your hypothesis percentile:
+
+| Percentile | Verdict | Meaning |
+|---|---|---|
+| Above historical max | 🚨 Exceeds ceiling | Possible but unprecedented — suggests median as backup |
+| ≥ 75th percentile | ⚠️ Ambitious | Plan for a slower read, have a fallback ready |
+| < 75th percentile | ✅ Realistic | Well within range — confidence supported by history |
+
+> Example: requesting +15% lift on Best Buy New, where historical lifts range from −2.3% to +8.4% → flags 🚨 with the median (+3.1%) suggested as a backup hypothesis.
+
+---
+
+#### 7. Scenario Matrix — Pressure-Testing the Hypothesis
+
+Alongside your target lift, the agent sizes **two alternative scenarios** so you see the trade-off space:
+
+| Scenario | Formula | Use it to answer… |
+|---|---|---|
+| 🟢 **Conservative** | requested lift × 0.33 | *"What if the lift is only a third of what I expect?"* |
+| 🔵 **Target (yours)** | requested lift | *"What does my main hypothesis cost?"* |
+| 🚀 **Stretch** | requested lift × 1.67 | *"What if I exceed my hypothesis?"* |
+
+Each scenario gets its own N/Arm, days to significance, projected iCustomers / iTTV, and verdict. If you'd still launch under the Conservative scenario, your test is **robust**. If only the Stretch justifies the spend, you're betting on an outlier.
+
+---
+
+#### 8. Hypothesis Types — One-Sided vs Two-Sided
+
+The pre-launch sizer asks you to choose:
+
+| Type | When to use | Effect on sample size |
+|---|---|---|
+| **One-sided** | You're confident the change can only *improve* CVR (directional) | Smaller sample needed (uses z = 1.645 at 95% instead of 1.960) |
+| **Two-sided** | You're testing whether CVR changes *at all* in either direction | Standard, more conservative — recommended default |
+
+At 95% confidence:
+- One-sided: z_α = **1.645** (~17% smaller sample)
+- Two-sided: z_α = **1.960** (industry standard)
+
+Confidence levels (90% / 95% / 99%) also adjust z_α — higher confidence means stronger evidence required, which means a larger sample.
 
 ---
 
@@ -1933,6 +2139,23 @@ def stream_demo_response(messages: list[dict]) -> Generator[dict, None, None]:
             )
         if target:
             yield from _handle_post_lookup(target)
+        else:
+            yield from _handle_generic(text)
+        return
+
+    # 0d. ROI lookup (from the ROI 'Specific Campaign' dropdown)
+    if "[roi_lookup]" in text_lower:
+        cid_m = re.search(r"canvas:\s*([a-f0-9-]+)", text, re.IGNORECASE)
+        target = None
+        if cid_m:
+            cid = cid_m.group(1).lower()
+            target = next(
+                (c for c in CAMPAIGNS
+                 if (c.get("CAMPAIGN_CANVAS_ID") or "").lower() == cid),
+                None,
+            )
+        if target:
+            yield from _handle_roi_lookup(target)
         else:
             yield from _handle_generic(text)
         return

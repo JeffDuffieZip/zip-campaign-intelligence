@@ -41,6 +41,7 @@ Then open [http://localhost:8501](http://localhost:8501).
 | ✅ POST | App Deals — July 4th (SCALE narrative) | Any completed + significant + winning campaign → dynamic final read |
 | ⏳ DURING | App Deals — Jan 2025 Email (STOP narrative) | Any `STATUS = running` campaign → live mid-flight check with dynamic days-to-sig and SCALE/EXTEND/STOP recommendation |
 | 📋 PRE | Best Buy New Purchasers V3 sizing | Custom campaign sizer form (segment · population · lift · hypothesis · CI) |
+| 📊 ROI | Generic 3-tier matrix (Mid/High/Very High CVR) | Any campaign → cost, TTV, NTM, and days-to-sig at its actual audience + segment baseline, plus 4 lift scenarios |
 
 **Ad-hoc queries (type anything):**
 - Look up any of the 41 campaigns by name or Canvas UUID

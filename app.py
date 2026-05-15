@@ -518,6 +518,8 @@ if "post_mode" not in st.session_state:
     st.session_state.post_mode = None  # None = chooser, "demo" = hard-coded, "pick" = picked campaign
 if "during_mode" not in st.session_state:
     st.session_state.during_mode = None  # None = chooser, "demo" = hard-coded, "pick" = picked campaign
+if "roi_mode" not in st.session_state:
+    st.session_state.roi_mode = None    # None = chooser, "demo" = generic matrix, "pick" = picked campaign
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -746,6 +748,52 @@ def render_executive_report():
         </div>
       </div>
       {f'<div style="margin-top:12px;padding:10px 14px;background:#F5F4F2;border-radius:8px;font-size:0.8rem;color:#786D79;font-style:italic;">&ldquo;{last_q[:200]}{"…" if len(last_q)>200 else ""}&rdquo;</div>' if last_q else ""}
+    </div>""", unsafe_allow_html=True)
+
+    # ── TL;DR card — synthesised one-line agent's take ────────────────────────
+    def _tldr_line():
+        nm = campaign_name or "this campaign"
+        if rec in ("SIZE_AND_LAUNCH", "GREENLIGHT") or (rec or "").startswith("🟢 YES"):
+            ic = exp_ic if exp_ic is not None else i_customers
+            tv = exp_ittv if exp_ittv is not None else i_ttv
+            days = days_to_sig
+            parts = [f"<b>Greenlight</b> a test of <b>{nm}</b>"]
+            if days: parts.append(f"~{days} days to significance")
+            if ic:   parts.append(f"~{ic:,} expected iCustomers")
+            if tv:   parts.append(f"~${tv:,.0f} projected iTTV")
+            return " · ".join(parts) + "."
+        if is_sig and t_stat and t_stat > 0:
+            parts = [f"<b>{nm}</b> is a winner"]
+            if t_stat:      parts.append(f"t = {t_stat:.2f} ({confidence})")
+            if i_customers: parts.append(f"+{i_customers:,} iCustomers")
+            if i_ttv:       parts.append(f"+${i_ttv:,.0f} iTTV")
+            parts.append("recommend <b>SCALE</b>")
+            return " · ".join(parts) + "."
+        if is_sig is False and t_stat is not None and abs(t_stat) < 1.0:
+            return (f"<b>{nm}</b> is not going to reach significance (t = {t_stat:.2f}). "
+                    f"Recommend <b>STOP</b> and redirect the audience.")
+        if is_sig is False and t_stat is not None:
+            return (f"<b>{nm}</b> is trending but not yet significant (t = {t_stat:.2f}). "
+                    f"Hold or extend before deciding.")
+        return f"Report generated for <b>{nm}</b> — see sections below for full breakdown."
+
+    st.markdown(f"""
+    <div style="background:linear-gradient(135deg,#EFE9FA 0%,#F8F4FF 100%);
+                border:1px solid #6442BD;border-radius:14px;
+                padding:20px 24px;margin-bottom:18px;
+                box-shadow:0 1px 3px rgba(100,66,189,0.10);">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+        <span style="font-size:1.4rem;">💡</span>
+        <span class="eyebrow" style="color:#411260;">The Agent's Take · TL;DR</span>
+      </div>
+      <div style="color:#1A0725;font-size:1.0rem;line-height:1.55;font-weight:500;">
+        {_tldr_line()}
+      </div>
+      <div style="color:#6442BD;font-size:0.7rem;margin-top:10px;letter-spacing:0.3px;">
+        📑 Below: 1 · Statistical Results &nbsp;·&nbsp; 2 · Business Impact &nbsp;·&nbsp;
+        3 · Strategic Alignment &nbsp;·&nbsp; 4 · Recommended Next Steps &nbsp;·&nbsp;
+        5 · Plain-English Explainer
+      </div>
     </div>""", unsafe_allow_html=True)
 
     # ── Section 1: Statistical results ───────────────────────────────────────
@@ -1118,18 +1166,20 @@ for col, sc in zip([c1, c2, c3, c4, c5], SCENARIOS):
     with col:
         active = "🔵 " if st.session_state.active_scenario == sc["id"] else ""
         if st.button(f"{sc['icon']} {active}{sc['stage']}: {sc['title']}", key=f"sc_{sc['id']}"):
-            if sc["id"] in ("pre", "post", "during"):
+            if sc["id"] in ("pre", "post", "during", "roi"):
                 # Open a chooser — don't fire the question yet
                 st.session_state.active_scenario = sc["id"]
                 st.session_state.pre_mode    = None
                 st.session_state.post_mode   = None
                 st.session_state.during_mode = None
+                st.session_state.roi_mode    = None
             else:
                 st.session_state.pending_question = sc["question"]
                 st.session_state.active_scenario  = sc["id"]
                 st.session_state.pre_mode    = None
                 st.session_state.post_mode   = None
                 st.session_state.during_mode = None
+                st.session_state.roi_mode    = None
             st.rerun()
 
 # ── PRE-CAMPAIGN CHOOSER (shown when PRE button is active) ────────────────────
@@ -1442,6 +1492,91 @@ if st.session_state.active_scenario == "during":
             else:
                 st.info("No campaigns are currently running in the data.")
                 st.form_submit_button("⏳ Run mid-flight check →", disabled=True,
+                                      use_container_width=True)
+
+# ── ROI CHOOSER (shown when ROI button is active) ─────────────────────────────
+if st.session_state.active_scenario == "roi":
+    st.markdown("""
+    <div style="background:#FFFFFF;border:1px solid #D6D4D2;border-radius:12px;
+                padding:18px 22px;margin:10px 0 6px 0;">
+      <div class="eyebrow" style="margin-bottom:10px;">📊 ROI Planning — choose your path</div>
+    </div>""", unsafe_allow_html=True)
+
+    demo_col, divider_col, pick_col = st.columns([5, 1, 6])
+
+    with demo_col:
+        st.markdown("""
+        <div style="background:#F5F4F2;border:1px solid #E1E0DF;border-radius:10px;
+                    padding:14px 16px;height:100%;">
+          <div style="font-size:0.8rem;font-weight:700;color:#1A0725;margin-bottom:4px;">
+            📋 Generic 3-Tier Matrix
+          </div>
+          <div style="font-size:0.74rem;color:#786D79;line-height:1.5;">
+            Compares Mid / High / Very High CVR tiers (6% · 8% · 10%) with unit-economics
+            flow, spend, NTM, and a recommended scenario.
+          </div>
+        </div>""", unsafe_allow_html=True)
+        st.markdown("<div style='margin-top:10px;'></div>", unsafe_allow_html=True)
+        if st.button("▶ Run Generic Matrix", key="roi_run_demo", use_container_width=True):
+            roi_sc = next(s for s in SCENARIOS if s["id"] == "roi")
+            st.session_state.pending_question = roi_sc["question"]
+            st.session_state.roi_mode = "demo"
+            st.rerun()
+
+    with divider_col:
+        st.markdown("""
+        <div style="display:flex;justify-content:center;align-items:center;height:100%;
+                    padding-top:20px;">
+          <div style="color:#D6D4D2;font-size:1.1rem;font-weight:300;">or</div>
+        </div>""", unsafe_allow_html=True)
+
+    with pick_col:
+        st.markdown("""
+        <div style="background:#EFE9FA;border:1px solid #6442BD;border-radius:10px;
+                    padding:14px 16px;">
+          <div style="font-size:0.8rem;font-weight:700;color:#411260;margin-bottom:4px;">
+            🔍 ROI for a Specific Campaign
+          </div>
+          <div style="font-size:0.74rem;color:#6442BD;line-height:1.5;">
+            Pick any campaign — the agent computes cost, TTV, NTM, and days-to-sig
+            at the actual audience size and segment baseline, plus 4 lift scenarios.
+          </div>
+        </div>""", unsafe_allow_html=True)
+
+        _roi_candidates = sorted(
+            [c for c in CAMPAIGNS
+             if c.get("CVR_CONTROL") and c.get("TARGET_AUDIENCE")],
+            key=lambda c: c.get("CAMPAIGN_LAUNCH_DATE", ""), reverse=True,
+        )
+        _roi_options = {
+            f"{c.get('display_name', '—')}  ·  {(c.get('segment') or 'BAU').replace('_', ' ')}  ·  "
+            f"{c.get('TARGET_AUDIENCE') or 0:,} eligible":
+            c.get("CAMPAIGN_CANVAS_ID", "")
+            for c in _roi_candidates
+        }
+
+        with st.form("roi_picker", clear_on_submit=False):
+            if _roi_options:
+                picked_r = st.selectbox(
+                    "Which campaign do you want an ROI breakdown for?",
+                    list(_roi_options.keys()),
+                )
+                submitted_r = st.form_submit_button("📊 Run campaign ROI →",
+                                                    use_container_width=True)
+                if submitted_r:
+                    cid = _roi_options[picked_r]
+                    picked_name = picked_r.split("  ·  ")[0]
+                    question = (
+                        f"[ROI_LOOKUP] Canvas: {cid}\n\n"
+                        f"Show me the ROI breakdown for **{picked_name}** — "
+                        f"cost, expected TTV, NTM, days to sig, and lift scenarios."
+                    )
+                    st.session_state.pending_question = question
+                    st.session_state.roi_mode = "pick"
+                    st.rerun()
+            else:
+                st.info("No campaigns available.")
+                st.form_submit_button("📊 Run campaign ROI →", disabled=True,
                                       use_container_width=True)
 
 st.markdown("<hr>", unsafe_allow_html=True)
