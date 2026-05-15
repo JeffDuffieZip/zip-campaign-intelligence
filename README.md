@@ -59,12 +59,36 @@ Then open [http://localhost:8501](http://localhost:8501).
 
 ### 📋 Executive Report tab
 
-Auto-generated from the last campaign analysis. Includes:
-- A/B results summary with traffic-light indicators (🟢🟡🔴)
-- Incrementality metrics (iCustomers, iTTV, cannibalization rate)
-- Strategic alignment with Zip Co's four growth pillars
-- Recommended next steps with live numbers
-- Stakeholder explainer — plain-language guide to every metric
+Auto-generated from the last campaign analysis and **fully stage-aware** — the
+section titles, KPI tiles and visuals reshape themselves depending on whether
+the report is **Pre-launch**, **Mid-flight** or **Post-campaign**.
+
+**🆕 Bottom Line card** — the agent's one-line take at the very top: scale,
+greenlight, extend, stop, or rethink.
+
+**🆕 Campaign identity card** — surfaces the long Braze-format name, launch
+date, segment, channel, status chip (● RUNNING / ● COMPLETED) and a
+color-coded **attribution window** (1-day = green/strict, 3-day = amber,
+7+ day = red/loose). The cannibalization tile becomes attribution-aware —
+a 3-day+ window with high cannibalization triggers a re-check warning.
+
+**🆕 Visual Dashboard** (powered by Plotly):
+- **Confidence Gauge** — needle on a 0 → 3.5 t-stat scale with red/amber/green
+  zones and a black threshold line at 1.96 (the 95% CI mark)
+- **Incrementality Donut** — purple = truly incremental, grey = cannibalized,
+  with the net-new % in the middle
+- **Pre-Launch Funnel** — projected audience → reached → converters →
+  incremental for sizing-mode reports
+
+**Stage-specific sections:**
+
+| Section | 📋 PRE | 📡 DURING | ✅ POST |
+|---|---|---|---|
+| 1 | Test Design (Required N, Days to Sig, Verdict) | Mid-Flight Read (current t-stat, Progress to Sig %, mid-flight call) | Statistical Results (sig, t-stat, CI, recommendation) |
+| 2 | Projected Impact | Live Impact (so far) | Business Impact |
+| 3 | Strategic Alignment — Zip Co Growth Agenda (4 pillars) |||
+| 4 | Launch Playbook | Mid-Flight Playbook | Recommended Next Steps |
+| 5 | Plain-English Explainer (stakeholder glossary) |||
 
 ---
 
