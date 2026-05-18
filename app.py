@@ -1139,15 +1139,33 @@ def render_executive_report():
                cann_sub,
                "#1B7E4F" if cann is not None and cann < 0.4 else
                "#A55A00" if cann is not None and cann < 0.6 else "#B43A3A")
-    if roi_pct is not None or days_to_sig is None:
-        _stat_tile(impact_cols[3], "Fixed ROI", f"{actual_roi:.1f}%",
-                   f"${net_margin:.2f} net margin per conversion", "#1B7E4F")
+    # Tile 4 priority: campaign-specific ROI > days_to_sig > required_n > fixed ROI
+    if i_ttv is not None and i_customers is not None and i_customers > 0:
+        # Campaign-specific ROI from actual iTTV and incremental converters
+        # Spend assumption: $10 incentive per incremental converter
+        # Net = (iTTV × NTM share) − ($10 × iCustomers)
+        gross_margin = i_ttv * 0.4144
+        spend        = i_customers * 10
+        net          = gross_margin - spend
+        camp_roi_pct = (net / spend * 100) if spend > 0 else 0
+        delta_vs_bench = camp_roi_pct - 424.3
+        bench_word = "above" if delta_vs_bench >= 0 else "below"
+        bench_color = "#1B7E4F" if delta_vs_bench >= 0 else "#A55A00"
+        _stat_tile(
+            impact_cols[3], "Campaign ROI",
+            f"{camp_roi_pct:.0f}%",
+            f"${net:,.0f} net · {abs(delta_vs_bench):.0f}pp {bench_word} 424% benchmark",
+            bench_color,
+        )
     elif days_to_sig:
         _stat_tile(impact_cols[3], "Days to Significance", str(days_to_sig),
                    "at current daily conversion rate", "#A55A00")
     elif required_n:
         _stat_tile(impact_cols[3], "Required N / Arm", req_n_str,
                    "for 80% power at 95% CI", "#A55A00")
+    else:
+        _stat_tile(impact_cols[3], "Benchmark ROI", f"{actual_roi:.1f}%",
+                   f"${net_margin:.2f} net per conversion (Zip unit economics)", "#1B7E4F")
 
     # ── Section 3: Strategic alignment with Zip Co goals ─────────────────────
     st.markdown('<div class="eyebrow" style="margin:18px 0 8px 0;">3 · Strategic Alignment — Zip Co Growth Agenda</div>',

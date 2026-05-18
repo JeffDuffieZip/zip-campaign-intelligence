@@ -810,7 +810,13 @@ def _handle_post_lookup(c: dict) -> Generator[dict, None, None]:
         f"The lift is real at {stat['confidence_label']} confidence and the incremental "
         f"revenue is **+${ittv:,.0f}**. Rebuild this exact creative + audience + "
         f"send-time recipe for the next comparable window — we have a "
-        f"**{segment}** playbook here worth productionising."
+        f"**{segment}** playbook here worth productionising.\n\n"
+        f"💰 **ROI snapshot:** "
+        f"+${ittv:,.0f} iTTV × 41.4% NTM = **${ittv * 0.4144:,.0f} gross**, "
+        f"− ${icust * 10:,.0f} incentive spend = "
+        f"**${ittv * 0.4144 - icust * 10:,.0f} net** "
+        f"(**{((ittv * 0.4144 - icust * 10) / (icust * 10) * 100) if icust else 0:.0f}% ROI** "
+        f"vs 424% benchmark)."
     )
 
     if similar:
@@ -927,6 +933,34 @@ def _handle_during_lookup(c: dict) -> Generator[dict, None, None]:
     ]
     toc_line = " · ".join(x for x in toc_items if x)
 
+    # Opportunity-cost framing: estimate $ value of extending vs stopping
+    proj_icust  = int(delta * n_t) if delta > 0 else 0
+    proj_ittv   = proj_icust * 52  # ≈ $126.50 × 0.4144 per incremental conv
+    extend_cost = proj_icust * 10  # incentive spend if we extend
+    extend_net  = proj_ittv * 0.4144 - extend_cost
+    if rec == "EXTEND" and days_needed:
+        opp_line = (
+            f"💰 **Money math:** extending ~{days_needed} days could deliver "
+            f"~**+{proj_icust:,} iCustomers** and **~${extend_net:,.0f} net** "
+            f"if the current effect holds.\n\n"
+        )
+    elif rec == "STOP":
+        wasted = int(days_running * 200)  # ballpark daily cost while idle
+        opp_line = (
+            f"💰 **Opportunity cost:** every additional week at this signal level "
+            f"burns budget on a test that won't reach significance. Reallocating to "
+            f"a 424%-ROI winner instead could net **~${wasted * 4:,.0f}** over the "
+            f"same window.\n\n"
+        )
+    elif rec == "SCALE":
+        opp_line = (
+            f"💰 **ROI snapshot:** at the current effect size, scaling to the full "
+            f"eligible pool nets ~**${extend_net:,.0f}** in additional iTTV "
+            f"(424% ROI on incentive spend).\n\n"
+        )
+    else:
+        opp_line = ""
+
     narrative = (
         f"## {rec_emoji} {name}: Mid-flight Read\n\n"
         f"*Segment: {segment} · Channel: {channel} · Launched: {launch} · "
@@ -941,7 +975,8 @@ def _handle_during_lookup(c: dict) -> Generator[dict, None, None]:
         f"{wwit_block}"
         f"---\n\n"
         f"### 3 · 📌 Recommendation — {rec}\n\n"
-        f"{rec_line}"
+        f"{rec_line}\n\n"
+        f"{opp_line}"
     )
 
     if similar:
